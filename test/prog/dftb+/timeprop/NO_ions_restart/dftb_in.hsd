@@ -60,7 +60,8 @@ Analysis = {
       FieldStrength [v/a] = 0.01
       IonDynamics = yes
       InitialTemperature [k] = 0.0
-      Restart = yes
+      Restart = Yes
+      RestartFromAscii = Yes
       WriteRestart = No
       Populations = Yes
     }

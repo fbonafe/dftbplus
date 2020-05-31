@@ -88,6 +88,7 @@
       }	
       Populations = Yes 
       Restart = Yes
+      RestartFromAscii = Yes
       WriteRestart = No 
   }
  }

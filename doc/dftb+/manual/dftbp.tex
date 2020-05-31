@@ -1411,7 +1411,7 @@ following properties:
     \item[\is{HardCutOff}] The Slater-Koster interpolation \dftbp{} produces
       will smoothly tail off to zero at a short distance beyond the table, which
       is controlled by \kw{OldSKInterpolation}. If \kw{HardCutOff} is set to
-      \kw{Yes}, then the distance set by \kw{SKMaxDistance} includes this tail,
+      \is{Yes}, then the distance set by \kw{SKMaxDistance} includes this tail,
       i.e., no interactions occur beyond that distance. In the case of \kw{No}
       this zeroing tail extends slightly beyond the \kw{HardCutOff} distance.
   \end{description}
@@ -3947,7 +3947,9 @@ time-dependent properties.
   \kw{EnvelopeShape} & m & Perturbation = Laser\cb & Constant & \pref{sec:dftbp.envelope} \\
   \kw{Populations} & l & & No & \\
   \kw{Restart} & l & & No & \\
+  \kw{RestartFromAscii} & l & Restart = Yes & No & \\
   \kw{WriteRestart} & l & & Yes & \\
+  \kw{WriteAsciiRestart} & l & WriteRestart = Yes & No & \\
   \kw{WriteFrequency} & i & & 50 & \\
   \kw{RestartFrequency} & i & & Steps/10 & \\
   \kw{Forces} & l & & No & \\
@@ -3981,11 +3983,19 @@ time-dependent properties.
   \verb|molpopul1.dat| (and \verb|molpopul2.dat| is the calculation is
   collinearly spin polarised).
 
-\item[\is{Restart}] If calculation should be restarted. The restart
-  file \verb|tddump.bin| must in the working directory.
+\item[\is{Restart}] If calculation should be restarted. The restart file
+  \verb|tddump.bin| must in the working directory.
 
-\item[\is{WriteRestart}] If restart file \verb|tddump.bin| should be written.
+\item[\is{RestartFromAscii}] If this is a restart calculation (\is{Restart} =
+  \is{Yes}), read \verb|tddump.dat| instead of \verb|tddump.bin| in the working
+  directory.
+  
+\item[\is{WriteRestart}] If a restart tddump file should be written. Details of
+  the contents of the file are discussed in appendix~\ref{app:tddump}.
 
+\item[\is{WriteAsciiRestart}] If a restart file is being written, select between
+  producing \verb|tddump.bin| or if set to \is{Yes}, \verb|tddump.dat|.
+  
 \item[\is{RestartFrequency}] Number of steps every which the system's
   state should be writen to restart file.
 
@@ -4042,8 +4052,9 @@ time-dependent properties.
   only the dipole moment output files will be written, since this
   keyword is used together with a \is{Kick} perturbation to probe the
   system. Notice that the dump file that contains the state of the
-  system that wants to be probed must be present and renamed to
-  \verb|tddump.bin|.
+  system that you want to be probed must be present and renamed to
+  \verb|tddump.bin| (or \verb|tddump.dat| if using the ascii
+  version of this data).
 
 \item[\is{EulerFrequency}] Number of steps every which an Euler
   integration step is done in the electronic propagation (that
@@ -4290,56 +4301,7 @@ calculations. This data is accumulated in a specified text file.
 \begin{description}
 \item[\is{OutputFile}] Text file to store the potential. If external electric
   fields are present, an additional column gives their values. See
-  p.~\pref{sec:dftbp.esp} for a description of the file.
-\item[\is{AppendFile}] If running calculations with multiple geometries, should
-  the \is{OutputFile} be appended or only contain the last potential
-  information?
-\item[\is{Softening}] \modif{\modtype{length}} Modifies the plotted potential to
-  remove the $r=0$ divergence of $\sfrac{1}{r}$, by setting $\epsilon$ and
-  instead plotting $\sfrac{1}{\sqrt{r^2 +\epsilon^2}}$. Internal potential
-  calculations are unaffected, only the exported data.
-\item[\is{Points}] \modif{\modtype{length}} List of cartesian points at which to
-  evaluate the electrostatic field. In the case Periodic = Yes, the modifier "F"
-  may instead be used to specify the points as fractions of the lattice vectors.
-\item[\is{Grid}] \modif{\modtype{length}} Specification of a regular 1, 2 or 3
-  dimensional grid of points. In the case Periodic = Yes, the modifier "F" may
-  instead be used to specify the points as fractions of the lattice vectors.
-  \begin{ptable}
-    \kw{GridPoints} & 3i  &  & & \\
-    \kw{Origin} & 3r  &  & & \\
-    \kw{Spacing} & 3r  &  & & \\
-    \kw{Directions} & 9r  & Modifier not F & 1 0 0\ \  0 1 0\ \  0 0 1& \\
-  \end{ptable}
-  \begin{description}
-    \item[\is{Spacing}] Separation between points in each direction. This
-      inherits the modifier for \is{Grid}.
-  \item[\is{Origin}] Location of first point in the grid. This inherits the
-    modifier for \is{Grid}.
-  \item[\is{GridPoints}] Number of points in each of the three direction of the
-    grid (a value of 1 places all points at the \is{Origin} of that direction).
-  \item[\is{Directions}] Set of 3 cartesian vectors along which the grid will
-    become aligned. This can rotate, skew, {\it etc.}\ the grid. The vectors are
-    internally normalised, but must be independent.
-  \end{description}
-\end{description}
-
-\subsubsection{ElectrostaticPotential}
-\label{sec:dftbp.ESP}
-
-Evaluates the electrostatic potential at specified points in space for SCC
-calculations. This data is accumulated in a specified text file.
-
-\begin{ptable}
-  \kw{OutputFile} & s  &  & "ESP.dat" & \\
-  \kw{AppendFile} & l  & MD or geometry optimisation & No & \\
-  \kw{Softening}  & r     & & 1E-6 & \\
-  \kw{Points}     & (3r)+ & \is{Grid} not set & \cb  & \\
-  \kw{Grid}       & m     & \is{Points} not set & \cb  & \\
-\end{ptable}
-\begin{description}
-\item[\is{OutputFile}] Text file to store the potential. If external electric
-  fields are present, an additional column gives their values. See
-  p.~\pref{sec:dftbp.esp} for a description of the file.
+  p.~\pref{sec:dftbp.espfile} for a description of the file.
 \item[\is{AppendFile}] If running calculations with multiple geometries, should
   the \is{OutputFile} be appended or only contain the last potential
   information?
@@ -5048,8 +5010,9 @@ total charge and magnetisation. In the case of orbital potentials
 (p.~\pref{sec:DFTB+U}) the file also contains extra population information for
 the occupation matrices.
 
-This file is produced as part of the mechanism to restart SCC calculations, see
-sections~\ref{kw:dftbp.RestartFrequency} and~\ref{kw:dftbp.MDRestartFrequency}.
+This file is produced as part of the mechanism to restart ground state SCC
+calculations, see sections~\ref{kw:dftbp.RestartFrequency}
+and~\ref{kw:dftbp.MDRestartFrequency}.
 
 Equivalent data can also be present in the file \verb|charges.dat|, but stored
 as plain text. The options \is{WriteChargesAsText} and \is{ReadChargesAsText}
@@ -5069,7 +5032,7 @@ small numbers of atoms and long MD simulations it may be useful to set
 instead.
 
 \section{Electrostatic potential data}
-\label{sec:dftbp.esp}
+\label{sec:dftbp.espfile}
 \index{ESP.dat}
 
 The output from evaluating the electrostatic potential. The first line
@@ -5332,8 +5295,8 @@ Time (in fs), $\mu_x$ (up), $\mu_y$ (up), $\mu_z$ (up), $\mu_x$
 \index{laser.dat}
 
 Created if \kw{Perturbation} = \kwcb{Laser}
-(see \label{sec:dftbp.tdpert}). Laser field components $E_i$ (in
-V/\AA) as a function of time, in the following order:
+(see~\ref{sec:dftbp.tdpert.laser}). Laser field components $E_i$ (in V/\AA) as a
+function of time, in the following order:
 
 time (in fs), $E_x$, $E_y$, $E_z$
 

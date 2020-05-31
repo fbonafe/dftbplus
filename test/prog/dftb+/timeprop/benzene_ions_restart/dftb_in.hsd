@@ -53,6 +53,7 @@ ParserOptions = {
       IonDynamics = Yes
       InitialTemperature [k] = 0.0
       Restart = Yes
+      RestartFromAscii = Yes
       WriteRestart = No
     }
  }

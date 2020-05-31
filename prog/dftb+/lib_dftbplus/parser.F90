@@ -4690,8 +4690,14 @@ contains
 
     call getChildValue(node, "Populations", input%tPopulations, .false.)
     call getChildValue(node, "WriteFrequency", input%writeFreq, 50)
-    call getChildValue(node, "Restart", input%tRestart, .false.)
+    call getChildValue(node, "Restart", input%tReadRestart, .false.)
+    if (input%tReadRestart) then
+      call getChildValue(node, "RestartFromAscii", input%tReadRestartAscii, .false.)
+    end if
     call getChildValue(node, "WriteRestart", input%tWriteRestart, .true.)
+    if (input%tWriteRestart) then
+      call getChildValue(node, "WriteAsciiRestart", input%tWriteRestartAscii, .false.)
+    end if
     call getChildValue(node, "RestartFrequency", input%restartFreq, input%Steps / 10)
     call getChildValue(node, "Forces", input%tForces, .false.)
     call getChildValue(node, "WriteBondEnergy", input%tBondE, .false.)

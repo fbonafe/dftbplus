@@ -49,6 +49,7 @@ ParserOptions = {
       }
       FieldStrength [v/a] = 0.001
       Restart = yes
+      RestartFromAscii = Yes
       WriteRestart = no
     }
  }
