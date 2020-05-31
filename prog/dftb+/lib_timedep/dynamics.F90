@@ -1025,8 +1025,8 @@ contains
             & ErhoPrim, coordAll)
       end if
 
-      tProbeFrameWrite = this%tPump .and. iStep >= this%PpIni .and. iStep <= this%PpEnd&
-          & .and. mod(iStep-this%PpIni, this%PpFreq) == 0
+      tProbeFrameWrite = this%tPump .and. (iStep >= this%PpIni) .and. (iStep <= this%PpEnd)&
+          & .and. (mod(iStep-this%PpIni, this%PpFreq) == 0)
       if (tProbeFrameWrite) then
         write(dumpIdx,'(I0)')int((iStep-this%PpIni)/this%PpFreq)
         call writeRestartFile(rho, rhoOld, Ssqr, coord, this%movedVelo, time, this%dt,&
