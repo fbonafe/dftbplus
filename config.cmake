@@ -1,12 +1,12 @@
 #
 # Global architecture independent build settings
 #
-set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type (Release|Debug)")
+set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type (Release|Debug)")
 
 set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/_install" CACHE STRING
   "Directory to install the compiled code into")
 
-option(WITH_OMP "Whether OpenMP thread parallisation should be enabled" FALSE)
+option(WITH_OMP "Whether OpenMP thread parallisation should be enabled" TRUE)
 
 option(WITH_MPI "Whether DFTB+ should support MPI-parallelism" FALSE)
 # If you build an MPI-parallised binary, consider to set WITH_OMP (OpenMP thread parallelisaton) to
