@@ -494,10 +494,11 @@ contains
       this%movedVelo(:,:) = 0.0_dp
     end if
 
-    if ((this%tIons .or. this%tForces) .and. (this%nExcitedAtom /= nAtom)) then
-      if (this%tKick .and. .not. this%tLaser) then
-        call error("Ion dynamics and forces are not implemented for purely kicked excitations")
-      else
+    if (this%tIons .or. this%tForces) then
+      if (this%tKick) then
+        call error("Ion dynamics and forces are not implemented for kicked excitations")
+      end if
+      if (this%nExcitedAtom /= nAtom) then
         call error("Ion dynamics and forces are not implemented for excitation of a subgroup of&
             & atoms")
       end if
