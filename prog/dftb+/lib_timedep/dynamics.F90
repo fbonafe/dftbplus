@@ -1030,8 +1030,9 @@ contains
             & ErhoPrim, coordAll)
       end if
 
+      ! WORKAROUND for gfort9, as mod(0,0) can be reached and fails with this compiler
       tProbeFrameWrite = this%tPump .and. (iStep >= this%PpIni) .and. (iStep <= this%PpEnd)&
-          & .and. (mod(iStep-this%PpIni, this%PpFreq) == 0)
+          & .and. (mod(iStep-this%PpIni, max(this%PpFreq,1)) == 0)
       if (tProbeFrameWrite) then
         write(dumpIdx,'(I0)')int((iStep-this%PpIni)/this%PpFreq)
         call writeRestartFile(rho, rhoOld, Ssqr, coord, this%movedVelo, time, this%dt,&
