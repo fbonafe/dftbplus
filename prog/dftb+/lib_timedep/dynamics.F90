@@ -495,8 +495,12 @@ contains
     end if
 
     if ((this%tIons .or. this%tForces) .and. (this%nExcitedAtom /= nAtom)) then
-      call error("Ion dynamics and forces are not implemented for excitation of a subgroup of&
-          & atoms")
+      if (this%tKick .and. .not. this%tLaser) then
+        call error("Ion dynamics and forces are not implemented for purely kicked excitations")
+      else
+        call error("Ion dynamics and forces are not implemented for excitation of a subgroup of&
+            & atoms")
+      end if
     end if
 
     tDispersion = allocated(dispersion)
@@ -873,7 +877,7 @@ contains
     real(dp) :: time, startTime, timeElec
     integer :: dipoleDat, qDat, energyDat, populDat(this%parallelKS%nLocalKS)
     integer :: forceDat, coorDat, ePBondDat
-    integer ::  iStep, iSpin, iKS
+    integer ::  iStep, iKS
     type(TPotentials) :: potential
     type(TEnergies) :: energy
     type(TTimer) :: loopTime
@@ -970,8 +974,8 @@ contains
       ! Initialize electron dynamics
       ! rhoOld is now the GS DM, rho will be the DM at time=dt
       trhoOld(:,:,:) = trho
-      call initializePropagator(this, this%dt, trhoOld, trho, H1, Sinv, coordAll, skHamCont,&
-          & skOverCont, orb, neighbourList, nNeighbourSK, img2CentCell, iSquare, rangeSep)
+      call initializePropagator(this, this%dt, trhoOld, trho, H1, Sinv, coordAll, skOverCont, orb,&
+          & neighbourList, nNeighbourSK, img2CentCell, iSquare, rangeSep)
     end if
 
     call getPositionDependentEnergy(this, energy, coordAll, img2CentCell, nNeighbourSK,&
@@ -1450,7 +1454,7 @@ contains
 
     real(dp) :: midPulse, deltaT, angFreq, E0, time, envelope
     real(dp) :: tdfun(3)
-    integer :: iStep, laserDat, laserDat2
+    integer :: iStep, laserDat
 
     midPulse = (this%time0 + this%time1)/2.0_dp
     deltaT = this%time1 - this%time0
@@ -1838,7 +1842,7 @@ contains
 
     real(dp), allocatable :: T2(:,:), T3(:,:)
     complex(dp), allocatable :: T4(:,:)
-    integer :: iSpin, iOrb, iOrb2, fillingsIn, iKS, iK, ii
+    integer :: iSpin, iOrb, iOrb2, fillingsIn, iKS, iK
 
     allocate(rhoPrim(size(ham, dim=1), this%nSpin))
     allocate(ErhoPrim(size(ham, dim=1)))
@@ -1964,8 +1968,8 @@ contains
 
   !> Perfoms a step backwards to boot the dynamics using the Euler algorithm.
   !> Output is rho(deltaT) called rhoNew, input is rho(t=0) (ground state) called rho
-  subroutine initializePropagator(this, step, rho, rhoNew, H1, Sinv, coordAll, skHamCont,&
-      & skOverCont, orb, neighbourList, nNeighbourSK, img2CentCell, iSquare, rangeSep)
+  subroutine initializePropagator(this, step, rho, rhoNew, H1, Sinv, coordAll, skOverCont,&
+      & orb, neighbourList, nNeighbourSK, img2CentCell, iSquare, rangeSep)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
@@ -1988,9 +1992,6 @@ contains
     !> Coords of the atoms (3, nAllAtom)
     real(dp), intent(in) :: coordAll(:,:)
 
-    !> Raw H^0 hamiltonian data
-    type(TSlakoCont), intent(in) :: skHamCont
-
     !> Raw overlap data
     type(TSlakoCont), intent(in) :: skOverCont
 
@@ -2012,7 +2013,7 @@ contains
     !> Range separation contributions
     type(TRangeSepFunc), allocatable, intent(inout) :: rangeSep
 
-    integer :: iSpin, iKS
+    integer :: iKS
     complex(dp), allocatable :: RdotSprime(:,:)
 
     allocate(RdotSprime(this%nOrbs,this%nOrbs))
@@ -2256,7 +2257,7 @@ contains
     !> Pairwise bond energy or order output file ID
     integer, intent(in) :: ePBondDat
 
-    integer :: iSpin, iKS
+    integer :: iKS
 
     close(dipoleDat)
     if ((.not. this%tKick) .or. (this%tKickAndLaser)) then
@@ -2878,10 +2879,6 @@ contains
     ! Data for the velocity verlet integrator
     type(TVelocityVerlet), allocatable :: pVelocityVerlet
 
-    real(dp) :: velocities(3, this%nMovedAtom)
-
-    integer :: ii
-
     if (this%nDynamicsInit == 0) then
       allocate(pVelocityVerlet)
     end if
@@ -3272,7 +3269,7 @@ contains
 
     real(dp) :: sPrimeTmp(orb%mOrb,orb%mOrb,3)
     real(dp) :: sPrimeTmp2(orb%mOrb,orb%mOrb), dcoord(3,this%nAtom)
-    integer :: iAtom1,iStart1,iEnd1,iSp1,nOrb1,iAtomAux,iDir
+    integer :: iAtom1,iStart1,iEnd1,iSp1,nOrb1,iDir
     integer :: iNeigh,iStart2,iEnd2,iAtom2,iAtom2f,iSp2,nOrb2
 
     dcoord(:,:) = 0.0_dp
@@ -3345,7 +3342,6 @@ contains
     type(TOrbitals), intent(in) :: orb
 
     real(dp) :: dist, uVects(3,3), vect(3), Stmp(2, orb%mOrb, orb%mOrb), Sder(orb%mOrb, orb%mOrb)
-    real(dp) :: Stmp2(3, orb%mOrb, orb%mOrb)
     real(dp) :: interSKOver(getMIntegrals(skOverCont))
     integer :: iAt, iSp, nOrb, dir, iAux
 
@@ -3409,7 +3405,7 @@ contains
     !> image atoms to their equivalent in the central cell
     integer, intent(in) :: img2CentCell(:)
 
-    integer :: iAt1, iAt2, iAt2f, nOrb1, nOrb2, iOrig, iStart, iEnd, iNeigh, mOrb, iOrb, iOrb2
+    integer :: iAt1, iAt2, iAt2f, nOrb1, nOrb2, iOrig, iNeigh, iOrb, iOrb2
 
     @:ASSERT(allocated(EObond))
     EObond(:,:) = 0.0_dp
