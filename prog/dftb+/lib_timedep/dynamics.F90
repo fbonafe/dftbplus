@@ -193,6 +193,8 @@ module dftbp_timeprop
     !> if initial fillings are provided in an external file
     logical :: tFillingsFromFile
 
+    !> if electronic entropy should be calculated and written to output
+    logical :: tCalcEntropy
   end type TElecDynamicsInp
 
   !> Data type for electronic dynamics internal settings
@@ -213,7 +215,7 @@ module dftbp_timeprop
     character(mc) :: autotestTag
 
     real(dp), allocatable :: initialVelocities(:,:), movedVelo(:,:), movedMass(:,:)
-    real(dp) :: mCutoff, skCutoff, laserField
+    real(dp) :: mCutoff, skCutoff, laserField, entropy
     real(dp), allocatable :: rCellVec(:,:), cellVec(:,:), kPoint(:,:), KWeight(:)
     real(dp), allocatable :: atomEigVal(:,:)
     integer :: nExcitedAtom, nMovedAtom, nSparse, eulerFreq, PpFreq, PpIni, PpEnd
@@ -222,7 +224,7 @@ module dftbp_timeprop
     logical :: isRangeSep
     logical :: FirstIonStep = .true., tEulers = .false., tBondE = .false., tBondP = .false.
     logical :: tPeriodic = .false., tFillingsFromFile = .false.
-    logical :: tNetCharges = .false.
+    logical :: tNetCharges = .false., tCalcEntropy = .false.
     type(TThermostat), allocatable :: pThermostat
     type(TMDIntegrator), allocatable :: pMDIntegrator
     class(TDispersionIface), allocatable :: dispersion
@@ -393,6 +395,8 @@ contains
     this%tRealHS = tRealHS
     this%kPoint = kPoint
     this%KWeight = KWeight
+    this%tCalcEntropy = inp%tCalcEntropy
+    this%entropy = 0.0_dp
     allocate(this%parallelKS, source=parallelKS)
 
     if (inp%envType /= envTypes%constant) then
@@ -899,7 +903,7 @@ contains
     complex(dp), allocatable :: H1LC(:,:), deltaRho(:,:,:)
     real(dp) :: time, startTime, timeElec
     integer :: dipoleDat, qDat, energyDat, populDat(this%parallelKS%nLocalKS)
-    integer :: forceDat, coorDat
+    integer :: forceDat, coorDat, entropyDat
     integer :: fdBondPopul, fdBondEnergy
     integer :: iStep, iKS
     type(TPotentials) :: potential
@@ -973,7 +977,7 @@ contains
       this%mCutOff = max(this%mCutOff, this%dispersion%getRCutOff())
     end if
 
-    call initTDOutput(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat)
+    call initTDOutput(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat, entropyDat)
 
     call getChargeDipole(this, deltaQ, qq, dipole, q0, trho, Ssqr, coord, iSquare, qBlock, qNetAtom)
     if (allocated(this%dispersion)) then
@@ -1073,8 +1077,11 @@ contains
       end if
 
       if (.not. this%tReadRestart .or. (iStep > 0) .or. this%tProbe) then
+        if (this%tCalcEntropy) then
+          call calcEntropy(this, rho, Ssqr, electronicSolver)
+        end if
         call writeTDOutputs(this, dipoleDat, qDat, energyDat, forceDat, coorDat, fdBondPopul,&
-            & fdBondEnergy, time, energy, energyKin, dipole, deltaQ, coord, totalForce, iStep)
+            & fdBondEnergy, time, energy, energyKin, dipole, deltaQ, entropyDat, coord, totalForce, iStep)
       end if
 
       if (this%tIons) then
@@ -1178,7 +1185,7 @@ contains
     end if
 
     call closeTDOutputs(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat, fdBondPopul,&
-        & fdBondEnergy)
+        & fdBondEnergy, entropyDat)
 
     if (this%tIons) then
       if (allocated(this%polDirs)) then
@@ -2238,7 +2245,8 @@ contains
 
 
   !> Initialize output files
-  subroutine initTDOutput(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat)
+  subroutine initTDOutput(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat, &
+       entropyDat)
     !> ElecDynamics instance
     type(TElecDynamics), intent(in) :: this
 
@@ -2259,6 +2267,9 @@ contains
 
     !> Coords  output file ID
     integer, intent(out) :: coorDat
+
+    !> Entropy output file ID
+    integer, intent(out) :: entropyDat
 
     character(20) :: dipoleFileName
     character(1) :: strSpin
@@ -2354,12 +2365,18 @@ contains
       end do
     end if
 
+    if (this%tCalcEntropy) then
+      call openFile(this, entropyDat, 'entropyvst.dat')
+      write(entropyDat, "(A)", advance = "NO")"#           time (fs)       |"
+      write(entropyDat, "(A)")" (von Neumann) entropy   "
+    end if
+
   end subroutine initTDOutput
 
 
   !> Close output files
   subroutine closeTDOutputs(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat,&
-      & fdBondPopul, fdBondEnergy)
+      & fdBondPopul, fdBondEnergy, entropyDat)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(in) :: this
@@ -2387,6 +2404,9 @@ contains
 
     !> Pairwise bond energy output file ID
     integer, intent(in) :: fdBondEnergy
+
+    !> Entropy output file ID
+    integer, intent(in) :: entropyDat
 
     integer :: iKS
 
@@ -2418,6 +2438,10 @@ contains
 
     if (this%tBondE) then
       close(fdBondEnergy)
+    end if
+
+    if (this%tCalcEntropy) then
+      close(entropyDat)
     end if
 
   end subroutine closeTDOutputs
@@ -2703,7 +2727,7 @@ contains
 
   !> Write results to file
   subroutine writeTDOutputs(this, dipoleDat, qDat, energyDat, forceDat, coorDat, fdBondPopul,&
-      & fdBondEnergy, time, energy, energyKin, dipole, deltaQ, coord, totalForce, iStep)
+      & fdBondEnergy, time, energy, energyKin, dipole, deltaQ, entropyDat, coord, totalForce, iStep)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(in) :: this
@@ -2744,6 +2768,9 @@ contains
     !> Pairwise bond energy output file ID
     integer, intent(in) :: fdBondEnergy
 
+    !> Entropy output file ID
+    integer, intent(in) :: entropyDat
+
     !> atomic coordinates
     real(dp), intent(in) :: coord(:,:)
 
@@ -2771,6 +2798,10 @@ contains
           write(qDat, "(F25.15)", advance="no")-sum(deltaQ(iAtom,:))
         end do
         write(qDat,*)
+      end if
+
+      if (this%tCalcEntropy) then
+        write(entropyDat, "(2X,2F25.15)") time * au__fs, this%entropy
       end if
     end if
 
@@ -3667,5 +3698,40 @@ contains
     end if
 
   end subroutine getBondPopulAndEnergy
+
+  subroutine calcEntropy(this, rho, Ssqr, electronicSolver)
+    !> ElecDynamics instance
+    type(TElecDynamics), intent(inout) :: this
+
+    !> Density Matrix
+    complex(dp), intent(in) :: rho(:,:,:)
+
+    !> Square overlap matrix
+    complex(dp), intent(inout) :: Ssqr(:,:,:)
+
+    !> Electronic solver information
+    type(TElectronicSolver), intent(inout) :: electronicSolver
+
+    complex(dp), allocatable :: T1(:,:)
+    real(dp) :: eigen(this%nOrbs)
+    integer :: iKS
+
+    if (.not. this%tRealHS) then
+      call error("Entropy not available for periodic systems.")
+    end if
+
+    allocate(T1(this%nOrbs,  this%nOrbs))
+    this%entropy = 0.0_dp
+
+    do iKS = 1, this%parallelKS%nLocalKS
+      T1(:,:) = rho(:,:,iKS)
+      call diagDenseMtx(electronicSolver, 'V', T1, Ssqr(:,:,iKS), eigen)
+      eigen = eigen * real(this%nSpin, dp) / 2.0_dp !if spin unpolarized, factor 0.5. if spin polarized, factor 1
+      this%entropy = this%entropy - sum(eigen * log(eigen))
+    end do
+
+    deallocate(T1)
+
+  end subroutine calcEntropy
 
 end module dftbp_timeprop

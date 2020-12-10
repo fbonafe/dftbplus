@@ -5112,6 +5112,7 @@ contains
     call getChildValue(node, "WriteBondPopulation", input%tBondP, .false.)
     call getChildValue(node, "Pump", input%tPump, .false.)
     call getChildValue(node, "FillingsFromFile", input%tFillingsFromFile, .false.)
+    call getChildValue(node, "CalculateEntropy", input%tCalcEntropy, .false.)
 
     if (input%tPump) then
       call getChildValue(node, "PumpProbeFrames", input%tdPPFrames)
