@@ -2846,6 +2846,9 @@ contains
           flush(fdBondEnergy)
         end if
       end if
+      if (this%tCalcEntropy) then
+        flush(entropyDat)
+      end if
     end if
 
   end subroutine writeTDOutputs
@@ -3699,6 +3702,8 @@ contains
 
   end subroutine getBondPopulAndEnergy
 
+
+  !> Calculates von Neumann entropy if requested
   subroutine calcEntropy(this, rho, Ssqr, electronicSolver)
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
@@ -3707,30 +3712,37 @@ contains
     complex(dp), intent(in) :: rho(:,:,:)
 
     !> Square overlap matrix
-    complex(dp), intent(inout) :: Ssqr(:,:,:)
+    complex(dp), intent(in) :: Ssqr(:,:,:)
 
     !> Electronic solver information
     type(TElectronicSolver), intent(inout) :: electronicSolver
 
-    complex(dp), allocatable :: T1(:,:)
+    complex(dp), allocatable :: T1(:,:), T2(:,:)
     real(dp) :: eigen(this%nOrbs)
-    integer :: iKS
+    integer :: iKS, iOrb
 
     if (.not. this%tRealHS) then
       call error("Entropy not available for periodic systems.")
     end if
 
-    allocate(T1(this%nOrbs,  this%nOrbs))
+    allocate(T1(this%nOrbs, this%nOrbs))
+    allocate(T2(this%nOrbs, this%nOrbs))
     this%entropy = 0.0_dp
 
     do iKS = 1, this%parallelKS%nLocalKS
-      T1(:,:) = rho(:,:,iKS)
-      call diagDenseMtx(electronicSolver, 'V', T1, Ssqr(:,:,iKS), eigen)
-      eigen = eigen * real(this%nSpin, dp) / 2.0_dp !if spin unpolarized, factor 0.5. if spin polarized, factor 1
-      this%entropy = this%entropy - sum(eigen * log(eigen))
+      !if spin unpolarized, factor 0.5. if spin polarized, factor 1
+      T1(:,:) = rho(:,:,iKS) * real(this%nSpin, dp) / 2.0_dp
+      T2(:,:) = Ssqr(:,:,iKS)
+      call diagDenseMtx(electronicSolver, 'N', T1, T2, eigen)
+      do iOrb = 1, this%nOrbs
+        if ((eigen(iOrb) > 0.0_dp) .and. (eigen(iOrb) < 1.0_dp)) then
+          this%entropy = this%entropy - eigen(iOrb) * log(eigen(iOrb))
+        end if
+      end do
     end do
 
     deallocate(T1)
+    deallocate(T2)
 
   end subroutine calcEntropy
 
