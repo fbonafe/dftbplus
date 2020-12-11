@@ -1078,7 +1078,7 @@ contains
 
       if (.not. this%tReadRestart .or. (iStep > 0) .or. this%tProbe) then
         if (this%tCalcEntropy) then
-          call calcEntropy(this, rho, Ssqr, electronicSolver)
+          call calcEntropy(this, rho, Sinv, electronicSolver)
         end if
         call writeTDOutputs(this, dipoleDat, qDat, energyDat, forceDat, coorDat, fdBondPopul,&
             & fdBondEnergy, time, energy, energyKin, dipole, deltaQ, entropyDat, coord, totalForce, iStep)
@@ -3704,15 +3704,15 @@ contains
 
 
   !> Calculates von Neumann entropy if requested
-  subroutine calcEntropy(this, rho, Ssqr, electronicSolver)
+  subroutine calcEntropy(this, rho, Sinv, electronicSolver)
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
 
     !> Density Matrix
     complex(dp), intent(in) :: rho(:,:,:)
 
-    !> Square overlap matrix
-    complex(dp), intent(in) :: Ssqr(:,:,:)
+    !> Square inverseoverlap matrix
+    complex(dp), intent(in) :: Sinv(:,:,:)
 
     !> Electronic solver information
     type(TElectronicSolver), intent(inout) :: electronicSolver
@@ -3732,7 +3732,7 @@ contains
     do iKS = 1, this%parallelKS%nLocalKS
       !if spin unpolarized, factor 0.5. if spin polarized, factor 1
       T1(:,:) = rho(:,:,iKS) * real(this%nSpin, dp) / 2.0_dp
-      T2(:,:) = Ssqr(:,:,iKS)
+      T2(:,:) = Sinv(:,:,iKS)
       call diagDenseMtx(electronicSolver, 'N', T1, T2, eigen)
       do iOrb = 1, this%nOrbs
         if ((eigen(iOrb) > 0.0_dp) .and. (eigen(iOrb) < 1.0_dp)) then
