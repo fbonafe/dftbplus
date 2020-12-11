@@ -502,15 +502,8 @@ contains
       this%movedVelo(:,:) = 0.0_dp
     end if
 
-    if (this%tIons .or. this%tForces) then
-      if (this%nExcitedAtom /= nAtom) then
-        if (this%tLaser) then
-          call error("Ion dynamics and forces are not implemented for excitation of a subgroup of&
-              & atoms")
-        else
-          this%nExcitedAtom = nAtom
-        end if
-      end if
+    if (this%nExcitedAtom /= nAtom) then
+      call warning("Excitation of of a subgroup of atoms might yield unphysical results.")
     end if
 
     this%tNetCharges = .false.
