@@ -1077,7 +1077,7 @@ contains
       end if
 
       if (.not. this%tReadRestart .or. (iStep > 0) .or. this%tProbe) then
-        if (this%tCalcEntropy) then
+        if (this%tCalcEntropy .and. mod(iStep, this%writeFreq) == 0) then
           call calcEntropy(this, rho, Ssqr, electronicSolver)
         end if
         call writeTDOutputs(this, dipoleDat, qDat, energyDat, forceDat, coorDat, fdBondPopul,&
