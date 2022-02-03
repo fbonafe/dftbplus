@@ -363,6 +363,9 @@ module dftbp_dftbplus_inputdata
     !> Are the k-points not suitable for integrals over the Brillouin zone
     logical :: poorKSampling = .false.
 
+    !> k-points reduced by inversion?
+    logical :: tReduceByInversion = .true.
+
     !> Cell pressure if periodic
     real(dp) :: pressure = 0.0_dp
     logical :: tBarostat = .false.
