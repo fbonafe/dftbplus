@@ -226,6 +226,7 @@ module dftbp_timedep_timeprop
     real(dp) :: phase
 
     real(dp), allocatable :: tdFunction(:, :)
+    real(dp), allocatable :: tdFunction(:, :), tdVecPot(:, :)
     complex(dp) :: fieldDir(3)
     integer :: writeFreq, pertType, envType, spType
     integer :: nAtom, nOrbs, nSpin=1, currPolDir=1, restartFreq
@@ -1160,12 +1161,12 @@ contains
     end if
 
     ! Add time dependent field if necessary
-    if (this%tLaser) then
+    if (this%tLaser .and. .not. this%tUseVectorPotential) then
       call setPresentField(this, iStep, errStatus)
       @:PROPAGATE_ERROR(errStatus)
       do iAtom = 1, this%nExcitedAtom
         iEatom = this%indExcitedAtom(iAtom)
-        potential%extAtom(iEatom, 1) = dot_product(coord(:,iEatom), this%presentField)
+        potential%extAtom(iEatom, 1) = dot_product(coord(:,iEatom), this%presentField) !agrega el término de acople con el E
       end do
       call totalShift(potential%extShell, potential%extAtom, orb, speciesAll)
       call totalShift(potential%extBlock, potential%extShell, orb, speciesAll)
@@ -1190,13 +1191,13 @@ contains
       iSpin = this%parallelKS%localKS(2, iKS)
       if (this%tRealHS) then
         call unpackHS(T2, ints%hamiltonian(:,iSpin), neighbourList%iNeighbour, nNeighbourSK,&
-            & iSquare, iSparseStart, img2CentCell)
-        call blockSymmetrizeHS(T2, iSquare)
-        H1(:,:,iSpin) = cmplx(T2, 0.0_dp, dp)
+            & iSquare, iSparseStart, img2CentCell)   !solo rellena un triangulo, porque es simetrica
+        call blockSymmetrizeHS(T2, iSquare)          !para completar la matriz (hacerla cuadrada)
+        H1(:,:,iSpin) = cmplx(T2, 0.0_dp, dp)    !hace falta por la gemm
       else
         call unpackHS(H1(:,:,iKS), ints%hamiltonian(:,iSpin), this%kPoint(:,iK),&
             & neighbourList%iNeighbour, nNeighbourSK, this%iCellVec, this%cellVec, iSquare,&
-            & iSparseStart, img2CentCell)
+            & iSparseStart, img2CentCell)              !notar que vuelve a llamar a unpackHS pero con otros argumentos
         call blockHermitianHS(H1(:,:,iKS), iSquare)
       end if
     end do
@@ -1222,6 +1223,8 @@ contains
         H1(:,:,iSpin) = H1(:,:,iSpin) + H1LC
       end do
     end if
+
+    !TODO: H1 * exp (A*(R-R'))
 
   end subroutine updateH
 
@@ -1305,7 +1308,7 @@ contains
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
 
-    !> starting time of the simulation, if relevant
+    !> starting time of the simulation, if relevant (for restart or pump-probe)
     real(dp), intent(in) :: startTime
 
     real(dp) :: midPulse, deltaT, angFreq, E0, time, envelope
@@ -1314,6 +1317,9 @@ contains
 
     allocate(this%tdFunction(3, 0:this%nSteps))
     this%tdFunction(:,:) = 0.0_dp
+    if (this%tUseVectorPotential) then
+      allocate(this%tdVecPot(3, 0:this%nSteps))
+    end if
 
     midPulse = (this%time0 + this%time1)/2.0_dp
     deltaT = this%time1 - this%time0
@@ -1334,7 +1340,7 @@ contains
     do iStep = 0,this%nSteps
       time = iStep * this%dt + startTime
 
-      if (this%envType == envTypes%constant) then
+      if (this%envType == envTypes%constant) then   !TODO replace by select case
         envelope = 1.0_dp
       else if (this%envType == envTypes%gaussian) then
         envelope = exp(-4.0_dp*pi*(time-midPulse)**2 / deltaT**2)
@@ -1354,6 +1360,11 @@ contains
             & this%tdFunction(:, iStep) * (Hartree__eV / Bohr__AA)
       end if
 
+      if (this%tUseVectorPotential) then
+        !TODO: correct envelope function by proper integral
+        this%tdVecPot(:, iStep) = E0/angFreq * envelope * &
+          & real(exp(imag*(time*angFreq + this%phase)) * this%fieldDir)
+      end if
     end do
 
     close(laserDat)

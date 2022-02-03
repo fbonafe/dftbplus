@@ -5689,6 +5689,9 @@ contains
       input%envType = envTypes%fromFile
       call getChildValue(value1, "Time0", input%time0, 0.0_dp, modifier=modifier, child=child)
       call convertUnitHsd(char(modifier), timeUnits, child, input%Time0)
+      if (input%tUseVectorPotential) then
+        call error("Vector potential is not supported with envelope from file")
+      end if
 
     case default
       call detailedError(value1, "Unknown envelope shape " // char(buffer))
