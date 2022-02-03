@@ -15,7 +15,7 @@
 !> https://doi.org/10.1021/acs.jctc.9b01217
 module dftbp_timedep_timeprop
   use dftbp_common_accuracy, only : dp, sc, lc, mc
-  use dftbp_common_constants, only : au__fs, pi, Bohr__AA, imag, Hartree__eV
+  use dftbp_common_constants, only : au__fs, pi, Bohr__AA, imag, Hartree__eV, c
   use dftbp_common_environment, only : TEnvironment, globalTimers
   use dftbp_common_file, only : TFileDescr, TOpenOptions, openFile, closeFile
   use dftbp_common_globalenv, only : stdOut
@@ -1142,6 +1142,7 @@ contains
     real(dp), allocatable :: T2(:,:)
     integer :: iAtom, iEatom, iSpin, iKS, iK
     logical :: tImHam
+    integer :: iAtom1, iStart1, iEnd1, iNeigh, iStart2, iEnd2, iAtom2, iAtom2f
 
     allocate(T2(this%nOrbs,this%nOrbs))
 
@@ -1239,7 +1240,26 @@ contains
       end do
     end if
 
-    !TODO: H1 * exp (A*(R-R'))
+    ! in case of vector potential
+    if (this%tUseVectorPotential .and. this%nSpin==1 .and. this%tRealHS) then
+      ! H1(:,:,1) = H1(:,:,1) *fac * exp(dot_product(this%tdVecPot(:,iStep),)
+      do iAtom1 = 1, this%nAtom
+        iStart1 = iSquare(iAtom1)
+        iEnd1 = iSquare(iAtom1+1)-1
+        do iNeigh = 1, nNeighbourSK(iAtom1)
+          iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
+          iAtom2f = img2CentCell(iAtom2)
+          iStart2 = iSquare(iAtom2f)
+          iEnd2 = iSquare(iAtom2f+1)-1
+          ! filling one side of the block
+          H1(iStart1:iEnd1,iStart2:iEnd2,1) = H1(iStart1:iEnd1,iStart2:iEnd2,1) &
+            & * exp(imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iatom2))))
+          ! filling transpose block
+          H1(iStart2:iEnd2,iStart1:iEnd1,1) = H1(iStart2:iEnd2,iStart1:iEnd1,1) &
+            & * exp(imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom2)-coord(:,iatom1))))
+        end do !integer :: iAtom1, iStart1, iEnd1, iNeigh, iStart2, iEnd2, iAtom2, iAtom2f
+      end do
+    end if
 
   end subroutine updateH
 
