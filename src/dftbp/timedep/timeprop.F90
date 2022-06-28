@@ -250,7 +250,7 @@ module dftbp_timedep_timeprop
     real(dp), allocatable :: atomEigVal(:,:)
     integer :: nExcitedAtom, nMovedAtom, nSparse, eulerFreq, PpFreq, PpIni, PpEnd
     integer, allocatable :: iCellVec(:), indExcitedAtom(:)
-    logical :: tForces, ReadMDVelocities, tPump, tProbe, tRealHS
+    logical :: tForces, ReadMDVelocities, tPump, tProbe, tRealHS, tCurrents
     logical :: isRangeSep
     logical :: FirstIonStep = .true., tEulers = .false., tBondE = .false., tBondP = .false.
     logical :: tPeriodic = .false., tFillingsFromFile = .false.
@@ -278,10 +278,11 @@ module dftbp_timedep_timeprop
     real(dp), allocatable :: qBlock(:,:,:,:), qNetAtom(:)
     complex(dp), allocatable :: Eiginv(:,:,:), EiginvAdj(:,:,:)
     real(dp), allocatable :: bondWork(:, :)
+    real(dp), allocatable :: orbCurrents(:,:), atomCurrents(:,:)
     real(dp) :: time, startTime, timeElec, energyKin, lastBondPopul
     type(TFileDescr), allocatable :: populDat(:)
     type(TFileDescr) :: dipoleDat, qDat, energyDat, atomEnergyDat
-    type(TFileDescr) :: forceDat, coorDat, fdBondPopul, fdBondEnergy
+    type(TFileDescr) :: forceDat, coorDat, fdBondPopul, fdBondEnergy, currentDat
     type(TPotentials) :: potential
 
     !> count of the number of times dynamics has been initialised
@@ -486,6 +487,8 @@ contains
     if (allocated(tblite)) then
       this%tblite = tblite
     end if
+
+    this%tCurrents = .true.
 
     if (inp%envType /= envTypes%constant) then
       this%time0 = inp%time0
@@ -2138,8 +2141,7 @@ contains
 
   !> Initialize output files
   subroutine initTDOutput(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat,&
-      & atomEnergyDat)
-
+      & atomEnergyDat, currentDat)
     !> ElecDynamics instance
     type(TElecDynamics), intent(in) :: this
 
@@ -2163,6 +2165,9 @@ contains
 
     !> Atom-resolved energy output file ID
     type(TFileDescr), intent(out) :: atomEnergyDat
+
+    !> Tdcurrents  output file ID
+    integer, intent(out) :: currentDat
 
     character(20) :: dipoleFileName
     character(1) :: strSpin
@@ -2231,6 +2236,11 @@ contains
       if (this%tIons) then
         call openOutputFile(this, coorDat, 'tdcoords.xyz')
       end if
+
+     if (this%tCurrents) then
+       call openFile(this, currentDat, 'tdcurrents.dat')
+     end if
+
     end if
 
     if (this%tPopulations) then
@@ -2282,7 +2292,7 @@ contains
 
   !> Close output files
   subroutine closeTDOutputs(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat,&
-      & fdBondPopul, fdBondEnergy, atomEnergyDat)
+      & fdBondPopul, fdBondEnergy, atomEnergyDat, currentDat)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(in) :: this
@@ -2305,6 +2315,9 @@ contains
     !> Coords output file ID
     type(TFileDescr), intent(inout) :: coorDat
 
+    !> Tdcurrents output file ID
+    integer, intent(in) :: currentDat
+
     !> Pairwise bond population output file ID
     type(TFileDescr), intent(inout) :: fdBondPopul
 
@@ -2324,6 +2337,7 @@ contains
     call closeFile(fdBondEnergy)
     call closeFile(atomEnergyDat)
 
+    close(currentDat)
   end subroutine closeTDOutputs
 
 
@@ -2383,7 +2397,8 @@ contains
 
   !> Write results to file
   subroutine writeTDOutputs(this, dipoleDat, qDat, energyDat, forceDat, coorDat, fdBondPopul,&
-      & fdBondEnergy, atomEnergyDat, time, energy, energyKin, dipole, deltaQ, coord, totalForce, iStep)
+      & fdBondEnergy, atomEnergyDat, currentDat, time, energy, energyKin, dipole, deltaQ, coord,&
+      & totalForce, iStep)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(in) :: this
@@ -2399,6 +2414,9 @@ contains
 
     !> Energy output file ID
     type(TFileDescr), intent(in) :: energyDat
+
+    !> tdcurrents output file ID
+    integer, intent(in) :: currentDat
 
     !> Elapsed simulation time
     real(dp), intent(in) :: time
@@ -2437,7 +2455,7 @@ contains
     type(TFileDescr), intent(in) :: atomEnergyDat
 
     real(dp) :: auxVeloc(3, this%nAtom)
-    integer :: iAtom, iSpin, iDir
+    integer :: iAtom, iAtom2, iSpin, iDir
 
     write(dipoleDat%unit, '(7F25.15)') time * au__fs, ((dipole(iDir, iSpin) * Bohr__AA, iDir=1, 3),&
         & iSpin=1, this%nSpin)
@@ -2488,11 +2506,26 @@ contains
       write(atomEnergyDat%unit, *)
     end if
 
+    if (this%tCurrents .and. mod(iStep, this%writeFreq) == 0) then
+      if (this%tdWriteExtras) then
+        write(currentDat, "(2X,2F25.15)", advance="no") time * au__fs
+        do iAtom = 1, this%nAtom
+          do iAtom2 = 1, this%nAtom
+            write(currentDat, "(F25.15)", advance="no")this%atomCurrents(iAtom, iAtom2)
+          end do
+        end do
+        write(currentDat,*)
+      end if
+    end if
+
     ! Flush output every 5% of the simulation
     if (mod(iStep, max(this%nSteps / 20, 1)) == 0 .and. iStep > this%writeFreq) then
       if (this%tdWriteExtras) then
-        flush(qDat%unit)
-        flush(energyDat%unit)
+        flush(qDat)
+        flush(energyDat)
+        if (this%tCurrents) then
+          flush(currentDat)
+        end if
         if (this%tIons) then
           flush(coorDat%unit)
         end if
@@ -3542,6 +3575,58 @@ contains
   end subroutine setPresentField
 
 
+  !> calculate pairwise currents
+  subroutine getTdCurrents(this, rho, iSquare)
+    !> ElecDynamics instance
+    type(TElecDynamics), intent(inout) :: this
+
+    !> Density matrix
+    complex(dp), intent(in) :: rho(:,:,:)
+
+    !> Index array for start of atomic block in dense matrices
+    integer, intent(in) :: iSquare(:)
+
+    complex(dp), allocatable :: T1(:,:), T2(:,:)
+    real(dp), allocatable :: T3(:,:)
+    integer :: iAt1, iAt2, iStart1, iStart2, iEnd1, iEnd2, iKS
+
+    allocate(T1(this%nOrbs,this%nOrbs))
+    allocate(T2(this%nOrbs,this%nOrbs))
+    allocate(T3(this%nOrbs,this%nOrbs))
+    this%orbCurrents = 0.0_dp
+    this%atomCurrents = 0.0_dp
+
+    do iKS = 1, this%parallelKS%nLocalKS
+      ! build E = S^{-1} H \rho
+      call gemm(T1, this%Sinv(:,:,iKS), this%H1(:,:,iKS))
+      call gemm(T2, T1, rho(:,:,iKS)) ! E = T1 here
+
+      ! T2 = S.Im(E), since S is defined as complex, we take real part
+      call gemm(T3, real(this%Ssqr(:,:,iKS)), aimag(T2), transB='t')
+      ! T2 = - ( H Im(\rho) - S Im(E) ), this has a minus sign already
+      ! since H is defined as complex, and S.Im(E) is real, we take real part
+      call gemm(T3, real(this%H1(:,:,iKS)), aimag(rho(:,:,iKS)), alpha=-1.0_dp, transB='t')
+
+      ! I = -4*e/hbar (H Im(\rho) - S*Im(E)), the minus sign is already included
+      ! and e = hbar = 1
+      this%orbCurrents(:,:) = this%orbCurrents + 4.0_dp * T3
+    end do
+
+    do iAt1 = 1, this%nAtom
+      do iAt2 = 1, this%nAtom
+        iStart1 = iSquare(iAt1)
+        iEnd1 = iSquare(iAt1+1)-1
+        iStart2 = iSquare(iAt2)
+        iEnd2 = iSquare(iAt2+1)-1
+        this%atomCurrents(iAt1,iAt2) = sum(this%orbCurrents(iStart1:iEnd1, iStart2:iEnd2))
+      end do
+    end do
+
+    deallocate(T1, T2, T3)
+
+  end subroutine getTdCurrents
+
+
   !> Handles the initializations of the variables needed for the time propagation
   subroutine initializeDynamics(this, boundaryCond, coord, orb, neighbourList, nNeighbourSK,&
       & iSquare, iSparseStart, img2CentCell, skHamCont, skOverCont, ints, env, coordAll, H0, spinW,&
@@ -3725,6 +3810,10 @@ contains
     allocate(this%deltaQ(this%nAtom,this%nSpin))
     allocate(this%dipole(3,this%nSpin))
     allocate(this%chargePerShell(orb%mShell,this%nAtom,this%nSpin))
+    if (this%tCurrents) then
+      allocate(this%orbCurrents(this%nOrbs, this%nOrbs))
+      allocate(this%atomCurrents(this%nAtom, this%nAtom))
+    end if
 
     allocate(this%occ(this%nOrbs))
     allocate(this%RdotSprime(this%nOrbs,this%nOrbs))
@@ -3772,7 +3861,7 @@ contains
     end if
 
     call initTDOutput(this, this%dipoleDat, this%qDat, this%energyDat,&
-        & this%populDat, this%forceDat, this%coorDat, this%atomEnergyDat)
+        & this%populDat, this%forceDat, this%coorDat, this%atomEnergyDat, this%currentDat)
 
     ! Write density at t=0
     if (this%tPump .and. .not. this%tReadRestart) then
@@ -3850,12 +3939,16 @@ contains
         & this%chargePerShell, this%energyKin, tDualSpinOrbit, thirdOrd, solvation, rangeSep,&
         & qDepExtPot, this%qBlock, dftbu, xi, iAtInCentralRegion, tFixEf, Ef, onSiteElements)
 
+    if (this%tCurrents) then
+      call getTdCurrents(this, this%trho, iSquare)
+    end if
+
     if (.not. this%tReadRestart .or. this%tProbe) then
       ! output ground state data
       call writeTDOutputs(this, this%dipoleDat, this%qDat, this%energyDat, &
           & this%forceDat, this%coorDat, this%fdBondPopul, this%fdBondEnergy, this%atomEnergyDat,&
-          & 0.0_dp, this%energy, this%energyKin, this%dipole, this%deltaQ, coord, this%totalForce,&
-          & 0)
+          & this%currentDat, 0.0_dp, this%energy, this%energyKin, this%dipole, this%deltaQ, coord,&
+          & this%totalForce, 0)
     end if
 
     ! now first step of dynamics is computed (init of leapfrog and first step of nuclei)
@@ -4068,6 +4161,10 @@ contains
         & this%chargePerShell, this%energyKin, tDualSpinOrbit, thirdOrd, solvation, rangeSep,&
         & qDepExtPot, this%qBlock, dftbU, xi, iAtInCentralRegion, tFixEf, Ef, onSiteElements)
 
+    if (this%tCurrents) then
+      call getTdCurrents(this, this%rho, iSquare)
+    end if
+
     if ((mod(iStep, this%writeFreq) == 0)) then
       call getBondPopulAndEnergy(this, this%bondWork, this%lastBondPopul, this%rhoPrim, this%ham0,&
           & ints, neighbourList%iNeighbour, nNeighbourSK, iSparseStart, img2CentCell, iSquare,&
@@ -4114,7 +4211,7 @@ contains
     if (.not. this%tReadRestart .or. (iStep > 0) .or. this%tProbe) then
       call writeTDOutputs(this, this%dipoleDat, this%qDat, this%energyDat, &
           & this%forceDat, this%coorDat, this%fdBondPopul, this%fdBondEnergy, this%atomEnergyDat,&
-          & this%time, this%energy, this%energyKin, this%dipole, this%deltaQ, coord,&
+          & this%currentDat, this%time, this%energy, this%energyKin, this%dipole, this%deltaQ, coord,&
           & this%totalForce, iStep)
     end if
 
@@ -4195,7 +4292,8 @@ contains
     type(TElecDynamics), intent(inout) :: this
 
     call closeTDOutputs(this, this%dipoleDat, this%qDat, this%energyDat, this%populDat,&
-        & this%forceDat, this%coorDat, this%fdBondPopul, this%fdBondEnergy, this%atomEnergyDat)
+        & this%forceDat, this%coorDat, this%fdBondPopul, this%fdBondEnergy, this%atomEnergyDat,&
+        & this%currentDat)
 
     deallocate(this%Ssqr)
     deallocate(this%Sinv)
@@ -4209,6 +4307,10 @@ contains
     deallocate(this%totalForce)
     deallocate(this%trho)
     deallocate(this%trhoOld)
+    if (this%tCurrents) then
+      deallocate(this%orbCurrents)
+      deallocate(this%atomCurrents)
+    end if
     if (allocated(this%Dsqr)) then
       deallocate(this%Dsqr)
     end if
