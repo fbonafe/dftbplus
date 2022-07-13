@@ -4081,7 +4081,7 @@ contains
     end if
 
     do iKS = 1, this%parallelKS%nLocalKS
-      if (this%tIons .or. (.not. this%tRealHS) .or. this%isRangeSep) then
+      if (this%tIons .or. (.not. this%tRealHS) .or. this%isRangeSep .or. this%tUseVectorPotential) then
         this%H1(:,:,iKS) = this%RdotSprime + imag * this%H1(:,:,iKS)
 
         if (this%tEulers .and. (iStep > 0) .and. (mod(iStep, max(this%eulerFreq,1)) == 0)) then
