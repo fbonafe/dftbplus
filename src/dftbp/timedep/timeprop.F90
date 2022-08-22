@@ -232,7 +232,6 @@ module dftbp_timedep_timeprop
     !> Phase applied of the laser field
     real(dp) :: phase
 
-    real(dp), allocatable :: tdFunction(:, :)
     real(dp), allocatable :: tdFunction(:, :), tdVecPot(:, :)
     complex(dp) :: fieldDir(3)
     integer :: writeFreq, pertType, envType, spType
