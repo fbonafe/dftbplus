@@ -1240,7 +1240,7 @@ contains
     end if
 
     ! in case of vector potential
-    if (this%tUseVectorPotential .and. this%nSpin==1 .and. this%tRealHS) then
+    if (this%tUseVectorPotential .and. this%nSpin==1) then
       ! H1(:,:,1) = H1(:,:,1) *fac * exp(dot_product(this%tdVecPot(:,iStep),)
       do iAtom1 = 1, this%nAtom
         iStart1 = iSquare(iAtom1)
@@ -1250,12 +1250,14 @@ contains
           iAtom2f = img2CentCell(iAtom2)
           iStart2 = iSquare(iAtom2f)
           iEnd2 = iSquare(iAtom2f+1)-1
-          ! filling one side of the block
-          H1(iStart1:iEnd1,iStart2:iEnd2,1) = H1(iStart1:iEnd1,iStart2:iEnd2,1) &
-            & * exp(imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iatom2))))
-          ! filling transpose block
-          H1(iStart2:iEnd2,iStart1:iEnd1,1) = H1(iStart2:iEnd2,iStart1:iEnd1,1) &
-            & * exp(imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom2)-coord(:,iatom1))))
+          do iKS = 1, this%parallelKS%nLocalKS
+            ! filling one side of the block
+            H1(iStart1:iEnd1,iStart2:iEnd2,iKS) = H1(iStart1:iEnd1,iStart2:iEnd2,iKS) &
+              & * exp(imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iAtom2))))
+            ! filling transpose block
+            H1(iStart2:iEnd2,iStart1:iEnd1,iKS) = H1(iStart2:iEnd2,iStart1:iEnd1,iKS) &
+              & * exp(imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom2)-coord(:,iAtom1))))
+          end do
         end do !integer :: iAtom1, iStart1, iEnd1, iNeigh, iStart2, iEnd2, iAtom2, iAtom2f
       end do
     end if
@@ -2272,11 +2274,10 @@ contains
       if (this%tIons) then
         call openOutputFile(this, coorDat, 'tdcoords.xyz')
       end if
+    end if
 
-     if (this%tCurrents) then
-       call openFile(this, currentDat, 'tdcurrents.dat')
-     end if
-
+    if (this%tCurrents) then
+      call openFile(this, currentDat, 'tdcurrents.dat')
     end if
 
     if (this%tPopulations) then
@@ -2372,8 +2373,7 @@ contains
     call closeFile(fdBondPopul)
     call closeFile(fdBondEnergy)
     call closeFile(atomEnergyDat)
-
-    close(currentDat)
+    call closeFile(currentDat)
   end subroutine closeTDOutputs
 
 
@@ -2543,15 +2543,13 @@ contains
     end if
 
     if (this%tCurrents .and. mod(iStep, this%writeFreq) == 0) then
-      if (this%tdWriteExtras) then
-        write(currentDat, "(2X,2F25.15)", advance="no") time * au__fs
-        do iAtom = 1, this%nAtom
-          do iAtom2 = 1, this%nAtom
-            write(currentDat, "(F25.15)", advance="no")this%atomCurrents(iAtom, iAtom2)
-          end do
+      write(currentDat, "(2X,2F25.15)", advance="no") time * au__fs
+      do iAtom = 1, this%nAtom
+        do iAtom2 = 1, this%nAtom
+          write(currentDat, "(F25.15)", advance="no")this%atomCurrents(iAtom, iAtom2)
         end do
-        write(currentDat,*)
-      end if
+      end do
+      write(currentDat,*)
     end if
 
     ! Flush output every 5% of the simulation
@@ -3624,7 +3622,7 @@ contains
 
     complex(dp), allocatable :: T1(:,:), T2(:,:)
     real(dp), allocatable :: T3(:,:)
-    integer :: iAt1, iAt2, iStart1, iStart2, iEnd1, iEnd2, iKS
+    integer :: iAt1, iAt2, iStart1, iStart2, iEnd1, iEnd2, iKS, iK
 
     allocate(T1(this%nOrbs,this%nOrbs))
     allocate(T2(this%nOrbs,this%nOrbs))
@@ -3633,6 +3631,7 @@ contains
     this%atomCurrents = 0.0_dp
 
     do iKS = 1, this%parallelKS%nLocalKS
+      iK = this%parallelKS%localKS(1, iKS)
       ! build E = S^{-1} H \rho
       call gemm(T1, this%Sinv(:,:,iKS), this%H1(:,:,iKS))
       call gemm(T2, T1, rho(:,:,iKS)) ! E = T1 here
@@ -3645,7 +3644,7 @@ contains
 
       ! I = -4*e/hbar (H Im(\rho) - S*Im(E)), the minus sign is already included
       ! and e = hbar = 1
-      this%orbCurrents(:,:) = this%orbCurrents + 4.0_dp * T3
+      this%orbCurrents(:,:) = this%orbCurrents + 4.0_dp * this%kWeight(iK) * T3
     end do
 
     do iAt1 = 1, this%nAtom
@@ -3884,6 +3883,11 @@ contains
     if (this%tLaser .and. .not. this%tdFieldThroughAPI .and. this%iCall == 1) then
       call getTDFunction(this, this%startTime)
     end if
+    if (this%tKick .and. this%tUseVectorPotential) then
+      ! initialize tdVecPot array, needed when calling updateH
+      allocate(this%tdVecPot(3, 0:this%nSteps))
+      this%tdVecPot = 0.0_dp 
+    end if
 
     call initializeTDVariables(this, this%trho, this%H1, this%Ssqr, this%Sinv, H0, this%ham0, &
         & this%Dsqr, this%Qsqr, ints, eigvecsReal, filling, orb, this%rhoPrim, this%potential, &
@@ -3964,7 +3968,11 @@ contains
 
     ! Apply kick to rho if necessary (in restart case, check it starttime is 0 or not)
     if (this%tKick .and. this%startTime < this%dt / 10.0_dp) then
-      call kickDM(this, this%trho, this%Ssqr, this%Sinv, iSquare, coord)
+      if(.not. this%tUseVectorPotential) then
+        call kickDM(this, this%trho, this%Ssqr, this%Sinv, iSquare, coord)
+      else
+        this%tdVecPot(this%currPolDir,:) = this%field
+      end if
     end if
 
     call getPositionDependentEnergy(this, this%energy, coordAll, img2CentCell, nNeighbourSK,&
@@ -4023,7 +4031,7 @@ contains
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, 0,&
         & this%chargePerShell, spinW, env, tDualSpinOrbit, xi, thirdOrd, this%qBlock, dftbU,&
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
-        & this%dispersion,this%rho, errStatus)
+        & this%dispersion, this%rho, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
     if (this%tForces) then
@@ -4303,7 +4311,7 @@ contains
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, iStep,&
         & this%chargePerShell, spinW, env, tDualSpinOrbit, xi, thirdOrd, this%qBlock, dftbU,&
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
-        & this%dispersion,this%rho, errStatus)
+        & this%dispersion, this%rho, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
     if (this%tForces) then
