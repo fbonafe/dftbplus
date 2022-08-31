@@ -1240,8 +1240,7 @@ contains
     end if
 
     ! in case of vector potential
-    if (this%tUseVectorPotential .and. this%nSpin==1) then
-      ! H1(:,:,1) = H1(:,:,1) *fac * exp(dot_product(this%tdVecPot(:,iStep),)
+    if (this%tUseVectorPotential) then
       do iAtom1 = 1, this%nAtom
         iStart1 = iSquare(iAtom1)
         iEnd1 = iSquare(iAtom1+1)-1
@@ -1253,12 +1252,12 @@ contains
           do iKS = 1, this%parallelKS%nLocalKS
             ! filling one side of the block
             H1(iStart1:iEnd1,iStart2:iEnd2,iKS) = H1(iStart1:iEnd1,iStart2:iEnd2,iKS) &
-              & * exp(imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iAtom2))))
+              & * exp(-imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iAtom2f))))
             ! filling transpose block
             H1(iStart2:iEnd2,iStart1:iEnd1,iKS) = H1(iStart2:iEnd2,iStart1:iEnd1,iKS) &
-              & * exp(imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom2)-coord(:,iAtom1))))
+              & * exp(-imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom2f)-coord(:,iAtom1))))
           end do
-        end do !integer :: iAtom1, iStart1, iEnd1, iNeigh, iStart2, iEnd2, iAtom2, iAtom2f
+        end do
       end do
     end if
 
@@ -3886,7 +3885,7 @@ contains
     if (this%tKick .and. this%tUseVectorPotential) then
       ! initialize tdVecPot array, needed when calling updateH
       allocate(this%tdVecPot(3, 0:this%nSteps))
-      this%tdVecPot = 0.0_dp 
+      this%tdVecPot = 0.0_dp
     end if
 
     call initializeTDVariables(this, this%trho, this%H1, this%Ssqr, this%Sinv, H0, this%ham0, &
@@ -3968,10 +3967,10 @@ contains
 
     ! Apply kick to rho if necessary (in restart case, check it starttime is 0 or not)
     if (this%tKick .and. this%startTime < this%dt / 10.0_dp) then
-      if(.not. this%tUseVectorPotential) then
+      if (.not. this%tUseVectorPotential) then
         call kickDM(this, this%trho, this%Ssqr, this%Sinv, iSquare, coord)
       else
-        this%tdVecPot(this%currPolDir,:) = this%field
+        this%tdVecPot(this%currPolDir,:) = -c * this%field
       end if
     end if
 
