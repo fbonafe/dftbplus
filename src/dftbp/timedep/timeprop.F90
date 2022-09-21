@@ -278,7 +278,7 @@ module dftbp_timedep_timeprop
     complex(dp), allocatable :: trhoOld(:,:,:)
     real(dp), allocatable :: qq(:,:,:)
     real(dp), allocatable :: rhoPrim(:,:), ham0(:), ErhoPrim(:), chargePerShell(:,:,:)
-    complex(dp), allocatable :: H1LC(:,:), deltaRho(:,:,:)
+    complex(dp), allocatable :: H1LC(:,:), deltaRho(:,:,:), hamCmplx(:,:)
     real(dp), allocatable :: movedAccel(:,:)
     real(dp), allocatable :: qBlock(:,:,:,:), qNetAtom(:)
     complex(dp), allocatable :: Eiginv(:,:,:), EiginvAdj(:,:,:)
@@ -1032,7 +1032,7 @@ contains
   subroutine updateH(this, H1, ints, H0, speciesAll, qq, q0, coord, orb, potential,&
       & neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, iStep, chargePerShell,&
       & spinW, env, tDualSpinOrbit, xi, thirdOrd, qBlock, dftbU, onSiteElements, refExtPot,&
-      & deltaRho, H1LC, Ssqr, solvation, rangeSep, dispersion, rho, errStatus)
+      & deltaRho, H1LC, Ssqr, solvation, rangeSep, dispersion, rho, coordAll, errStatus)
 
     !> ElecDynamics instance
     type(TElecDynamics) :: this
@@ -1133,6 +1133,9 @@ contains
     !> Density matrix
     complex(dp), intent(in) :: rho(:,:,:)
 
+    !> Coords of the atoms (3, nAllAtom)
+    real(dp), intent(in) :: coordAll(:,:)
+
     !> Error status
     type(TStatus), intent(out) :: errStatus
 
@@ -1142,6 +1145,7 @@ contains
     integer :: iAtom, iEatom, iSpin, iKS, iK
     logical :: tImHam
     integer :: iAtom1, iStart1, iEnd1, iNeigh, iStart2, iEnd2, iAtom2, iAtom2f
+    integer :: ii, jj, nOrb1, nOrb2, iOrig
 
     allocate(T2(this%nOrbs,this%nOrbs))
 
@@ -1181,7 +1185,7 @@ contains
       @:PROPAGATE_ERROR(errStatus)
       do iAtom = 1, this%nExcitedAtom
         iEatom = this%indExcitedAtom(iAtom)
-        potential%extAtom(iEatom, 1) = dot_product(coord(:,iEatom), this%presentField) !agrega el término de acople con el E
+        potential%extAtom(iEatom, 1) = dot_product(coord(:,iEatom), this%presentField)
       end do
       call totalShift(potential%extShell, potential%extAtom, orb, speciesAll)
       call totalShift(potential%extBlock, potential%extShell, orb, speciesAll)
@@ -1201,19 +1205,79 @@ contains
       call qm2ud(qq)
     end if
 
+    ! Check if we need to apply Peierls phase to opverlap matrix
+    if (this%tUseVectorPotential) then
+      this%hamCmplx(:,:) = ints%hamiltonian ! real to complex
+      do iAtom1 = 1, this%nAtom
+        ii = iSquare(iAtom1)
+        nOrb1 = iSquare(iAtom1 + 1) - ii
+        do iNeigh = 1, nNeighbourSK(iAtom1)
+          iOrig = iSparseStart(iNeigh, iAtom1) + 1
+          iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
+          iAtom2f = img2CentCell(iAtom2)
+          jj = iSquare(iAtom2f)
+          @:ASSERT(jj >= ii)
+          nOrb2 = iSquare(iAtom2f + 1) - jj
+          do iSpin = 1, this%nSpin
+            this%hamCmplx(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) = this%hamCmplx(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) &
+                 & * exp(-imag/c * dot_product(this%tdVecPot(:,iStep), (coordAll(:,iAtom2) - coordAll(:,iAtom1))))
+          end do
+        ! the order of the coords is bc this sparse array fills the square(jj:jj+nOrb2-1, ii:ii+nOrb1-1)
+        ! before this was:
+        ! H1(iStart1:iEnd1,iStart2:iEnd2,iKS) = H1(iStart1:iEnd1,iStart2:iEnd2,iKS) &
+        !   & * exp(-imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iAtom2f))))
+  
+        !print *,'iAt1',iAtom1,'coordAll(:,iAtom1)',coordAll(:,iAtom1)
+        !print *,'iAt2',iAtom2,'coordAll(:,iAtom2)',coordAll(:,iAtom2)
+        !print *,'iAt2f',iAtom2f,'coordAll(:,iAtom2f)',coordAll(:,iAtom2f)
+        !print *,'size coord',size(coord)
+        !print *,'size coordAll',size(coordAll)
+        end do
+      end do
+    end if
+
+    ! in case of vector potential
+!    if (this%tUseVectorPotential) then
+!      do iAtom1 = 1, this%nAtom
+!        iStart1 = iSquare(iAtom1)
+!        iEnd1 = iSquare(iAtom1+1)-1
+!        do iNeigh = 1, nNeighbourSK(iAtom1)
+!          iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
+!          iAtom2f = img2CentCell(iAtom2)
+!          iStart2 = iSquare(iAtom2f)
+!          iEnd2 = iSquare(iAtom2f+1)-1
+!          do iKS = 1, this%parallelKS%nLocalKS
+!            ! filling one side of the block
+!            H1(iStart1:iEnd1,iStart2:iEnd2,iKS) = H1(iStart1:iEnd1,iStart2:iEnd2,iKS) &
+!              & * exp(-imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iAtom2f))))
+!            ! filling transpose block
+!            H1(iStart2:iEnd2,iStart1:iEnd1,iKS) = H1(iStart2:iEnd2,iStart1:iEnd1,iKS) &
+!              & * exp(-imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom2f)-coord(:,iAtom1))))
+!          end do
+!        end do
+!      end do
+!    end if
+    
     do iKS = 1, this%parallelKS%nLocalKS
       iK = this%parallelKS%localKS(1, iKS)
       iSpin = this%parallelKS%localKS(2, iKS)
-      if (this%tRealHS) then
-        call unpackHS(T2, ints%hamiltonian(:,iSpin), neighbourList%iNeighbour, nNeighbourSK,&
-            & iSquare, iSparseStart, img2CentCell)   !solo rellena un triangulo, porque es simetrica
-        call blockSymmetrizeHS(T2, iSquare)          !para completar la matriz (hacerla cuadrada)
-        H1(:,:,iSpin) = cmplx(T2, 0.0_dp, dp)    !hace falta por la gemm
-      else
-        call unpackHS(H1(:,:,iKS), ints%hamiltonian(:,iSpin), this%kPoint(:,iK),&
+      if (this%tUseVectorPotential) then
+        call unpackHS(H1(:,:,iKS), this%hamCmplx(:,iSpin), this%kPoint(:,iK),&
             & neighbourList%iNeighbour, nNeighbourSK, this%iCellVec, this%cellVec, iSquare,&
-            & iSparseStart, img2CentCell)              !notar que vuelve a llamar a unpackHS pero con otros argumentos
+            & iSparseStart, img2CentCell)
         call blockHermitianHS(H1(:,:,iKS), iSquare)
+      else
+        if (this%tRealHS) then
+          call unpackHS(T2, ints%hamiltonian(:,iSpin), neighbourList%iNeighbour, nNeighbourSK,&
+              & iSquare, iSparseStart, img2CentCell)
+          call blockSymmetrizeHS(T2, iSquare)
+          H1(:,:,iSpin) = cmplx(T2, 0.0_dp, dp)
+        else
+          call unpackHS(H1(:,:,iKS), ints%hamiltonian(:,iSpin), this%kPoint(:,iK),&
+              & neighbourList%iNeighbour, nNeighbourSK, this%iCellVec, this%cellVec, iSquare,&
+              & iSparseStart, img2CentCell)
+          call blockHermitianHS(H1(:,:,iKS), iSquare)
+        end if
       end if
     end do
 
@@ -1236,28 +1300,6 @@ contains
             & H1LC)
         call blockHermitianHS(H1LC, iSquare)
         H1(:,:,iSpin) = H1(:,:,iSpin) + H1LC
-      end do
-    end if
-
-    ! in case of vector potential
-    if (this%tUseVectorPotential) then
-      do iAtom1 = 1, this%nAtom
-        iStart1 = iSquare(iAtom1)
-        iEnd1 = iSquare(iAtom1+1)-1
-        do iNeigh = 1, nNeighbourSK(iAtom1)
-          iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
-          iAtom2f = img2CentCell(iAtom2)
-          iStart2 = iSquare(iAtom2f)
-          iEnd2 = iSquare(iAtom2f+1)-1
-          do iKS = 1, this%parallelKS%nLocalKS
-            ! filling one side of the block
-            H1(iStart1:iEnd1,iStart2:iEnd2,iKS) = H1(iStart1:iEnd1,iStart2:iEnd2,iKS) &
-              & * exp(-imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iAtom2f))))
-            ! filling transpose block
-            H1(iStart2:iEnd2,iStart1:iEnd1,iKS) = H1(iStart2:iEnd2,iStart1:iEnd1,iKS) &
-              & * exp(-imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom2f)-coord(:,iAtom1))))
-          end do
-        end do
       end do
     end if
 
@@ -3848,6 +3890,9 @@ contains
       allocate(this%orbCurrents(this%nOrbs, this%nOrbs))
       allocate(this%atomCurrents(this%nAtom, this%nAtom))
     end if
+    if (this%tUseVectorPotential) then
+      allocate(this%hamCmplx(size(ints%hamiltonian, dim=1), size(ints%hamiltonian, dim=2)))
+    end if
 
     allocate(this%occ(this%nOrbs))
     allocate(this%RdotSprime(this%nOrbs,this%nOrbs))
@@ -3940,7 +3985,7 @@ contains
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, 0,&
         & this%chargePerShell, spinW, env, tDualSpinOrbit, xi, thirdOrd, this%qBlock, dftbU,&
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
-        & this%dispersion, this%trho, errStatus)
+        & this%dispersion, this%trho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
     if (this%tForces) then
@@ -4030,7 +4075,7 @@ contains
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, 0,&
         & this%chargePerShell, spinW, env, tDualSpinOrbit, xi, thirdOrd, this%qBlock, dftbU,&
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
-        & this%dispersion, this%rho, errStatus)
+        & this%dispersion, this%rho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
     if (this%tForces) then
@@ -4310,7 +4355,7 @@ contains
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, iStep,&
         & this%chargePerShell, spinW, env, tDualSpinOrbit, xi, thirdOrd, this%qBlock, dftbU,&
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
-        & this%dispersion, this%rho, errStatus)
+        & this%dispersion, this%rho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
     if (this%tForces) then
