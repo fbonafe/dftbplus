@@ -235,7 +235,7 @@ module dftbp_timedep_timeprop
     real(dp), allocatable :: tdFunction(:, :), tdVecPot(:, :)
     complex(dp) :: fieldDir(3)
     integer :: writeFreq, pertType, envType, spType
-    integer :: nAtom, nOrbs, nSpin=1, currPolDir=1, restartFreq
+    integer :: nAtom, nAllAtom, nOrbs, nSpin=1, currPolDir=1, restartFreq
     integer :: nDipole = 0, nQuadrupole = 0
     logical :: tdWriteExtras
     integer, allocatable :: species(:), polDirs(:), speciesAll(:)
@@ -2586,7 +2586,7 @@ contains
     if (this%tCurrents .and. mod(iStep, this%writeFreq) == 0) then
       write(currentDat, "(2X,2F25.15)", advance="no") time * au__fs
       do iAtom = 1, this%nAtom
-        do iAtom2 = 1, this%nAtom
+        do iAtom2 = 1, this%nAllAtom
           write(currentDat, "(F25.15)", advance="no")this%atomCurrents(iAtom, iAtom2)
         end do
       end do
@@ -3265,6 +3265,7 @@ contains
       do iKS = 1, this%parallelKS%nLocalKS
         iK = this%parallelKS%localKS(1, iKS)
         iSpin = this%parallelKS%localKS(2, iKS)
+        !FIXME: what about complex rhoPrim?
         call packHS(rhoPrim(:,iSpin), real(rho(:,:,iKS), dp), neighbourList%iNeighbour,&
             & nNeighbourSK, orb%mOrb, iSquare, iSparseStart, img2CentCell)
         call gemm(T1R, real(rho(:,:,iKS), dp), real(H1(:,:,iKS), dp))
@@ -3283,6 +3284,7 @@ contains
             & iSquare, iSparseStart, img2CentCell)
         call gemm(T1C, rho(:,:,iKS), H1(:,:,iKS))
         call her2k(T2C, Sinv(:,:,iKS), T1C, (0.5_dp,0.0_dp))
+        !FIXME: definition of ErhoPrim in unfolded space when implementing Ehrenfest for periodic systems
         call packHS(ErhoPrim, T2C, this%kPoint(:,iK), this%kWeight(iK), neighbourList%iNeighbour,&
             & nNeighbourSK, orb%mOrb, this%iCellVec, this%cellVec, iSquare, iSparseStart,&
             & img2CentCell)
@@ -3651,7 +3653,8 @@ contains
 
 
   !> calculate pairwise currents
-  subroutine getTdCurrents(this, rho, iSquare)
+  subroutine getTdCurrents(this, rho, iSquare, neighbourList, nNeighbourSK, orb,&
+      & iSparseStart, img2CentCell)
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
 
@@ -3661,44 +3664,122 @@ contains
     !> Index array for start of atomic block in dense matrices
     integer, intent(in) :: iSquare(:)
 
+    !> Image atom indices to central cell atoms
+    integer, intent(in) :: img2CentCell(:)
+
+    !> Number of neighbours for each of the atoms
+    integer, intent(in) :: nNeighbourSK(:)
+
+    !> List of neighbours for each atom
+    type(TNeighbourList), intent(in) :: neighbourList
+
+    !> index array for location of atomic blocks in large sparse arrays
+    integer, intent(in) :: iSparseStart(0:,:)
+
+    !> data type for atomic orbital information
+    type(TOrbitals), intent(in) :: orb
+
     complex(dp), allocatable :: T1(:,:), T2(:,:)
     real(dp), allocatable :: T3(:,:)
+    complex(dp), allocatable :: rhoPrim(:,:), ee(:,:)
+    real(dp), allocatable :: hh(:,:), ss(:,:)
+    real(dp) :: orbCurrentsPrim(orb%mOrb**2)
     integer :: iAt1, iAt2, iStart1, iStart2, iEnd1, iEnd2, iKS, iK
+    integer :: iSpin, iAtom1, iAtom2, iAtom2f, nOrb1, nOrb2, iOrig, iNeigh
 
     allocate(T1(this%nOrbs,this%nOrbs))
     allocate(T2(this%nOrbs,this%nOrbs))
-    allocate(T3(this%nOrbs,this%nOrbs))
+!    allocate(T3(this%nOrbs,this%nOrbs))
+
+    allocate(rhoPrim(this%nSparse, this%nSpin))
+    allocate(ee(this%nSparse, this%nSpin))
+    allocate(hh(this%nSparse, this%nSpin))
+    allocate(ss(this%nSparse, this%nSpin))
+
     this%orbCurrents = 0.0_dp
     this%atomCurrents = 0.0_dp
+    rhoPrim(:,:) = 0.0_dp
+    hh(:,:) = 0.0_dp
+    ss(:,:) = 0.0_dp
+    ee(:,:) = 0.0_dp
 
     do iKS = 1, this%parallelKS%nLocalKS
       iK = this%parallelKS%localKS(1, iKS)
+      iSpin = this%parallelKS%localKS(2, iKS)
+
       ! build E = S^{-1} H \rho
+      ! TODO: check if inversion is properly done here
       call gemm(T1, this%Sinv(:,:,iKS), this%H1(:,:,iKS))
-      call gemm(T2, T1, rho(:,:,iKS)) ! E = T1 here
+      call gemm(T2, T1, rho(:,:,iKS)) ! E(k) = T2 here
 
-      ! T2 = S.Im(E), since S is defined as complex, we take real part
-      call gemm(T3, real(this%Ssqr(:,:,iKS)), aimag(T2), transB='t')
-      ! T2 = - ( H Im(\rho) - S Im(E) ), this has a minus sign already
-      ! since H is defined as complex, and S.Im(E) is real, we take real part
-      call gemm(T3, real(this%H1(:,:,iKS)), aimag(rho(:,:,iKS)), alpha=-1.0_dp, transB='t')
-
-      ! I = -4*e/hbar (H Im(\rho) - S*Im(E)), the minus sign is already included
-      ! and e = hbar = 1
-      this%orbCurrents(:,:) = this%orbCurrents + 4.0_dp * this%kWeight(iK) * T3
+      call packHS(rhoPrim(:,iSpin), rho(:,:,iKS), this%kPoint(:,iK), this%kWeight(iK),&
+          & neighbourList%iNeighbour, nNeighbourSK, orb%mOrb, this%iCellVec, this%cellVec,&
+          & iSquare, iSparseStart, img2CentCell)
+      call packHS(hh(:,iSpin), this%H1(:,:,iKS), this%kPoint(:,iK), this%kWeight(iK),&
+          & neighbourList%iNeighbour, nNeighbourSK, orb%mOrb, this%iCellVec, this%cellVec,&
+          & iSquare, iSparseStart, img2CentCell)
+      call packHS(ss(:,iSpin), this%Ssqr(:,:,iKS), this%kPoint(:,iK), this%kWeight(iK),&
+          & neighbourList%iNeighbour, nNeighbourSK, orb%mOrb, this%iCellVec, this%cellVec,&
+          & iSquare, iSparseStart, img2CentCell)
+      call packHS(ee(:,iSpin), T2, this%kPoint(:,iK), this%kWeight(iK),&
+          & neighbourList%iNeighbour, nNeighbourSK, orb%mOrb, this%iCellVec, this%cellVec,&
+          & iSquare, iSparseStart, img2CentCell)
     end do
 
-    do iAt1 = 1, this%nAtom
-      do iAt2 = 1, this%nAtom
-        iStart1 = iSquare(iAt1)
-        iEnd1 = iSquare(iAt1+1)-1
-        iStart2 = iSquare(iAt2)
-        iEnd2 = iSquare(iAt2+1)-1
-        this%atomCurrents(iAt1,iAt2) = sum(this%orbCurrents(iStart1:iEnd1, iStart2:iEnd2))
+    do iSpin = 1, this%nSpin
+    do iAtom1 = 1, this%nAtom
+      nOrb1 = orb%nOrbAtom(iAtom1)
+      do iNeigh = 0, nNeighbourSK(iAtom1)
+        orbCurrentsPrim(:) = 0.0_dp
+        iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
+        iAtom2f = img2CentCell(iAtom2)
+        nOrb2 = orb%nOrbAtom(iAtom2f)
+        iOrig = iSparseStart(iNeigh,iAtom1) + 1
+        ! I = -4*e/hbar (H_ab Im(\rho_ab) - S_ab*Im(E_ab))
+        orbCurrentsPrim(1:nOrb1*nOrb2) = hh(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) * aimag(rhoPrim(iOrig:iOrig+nOrb1*nOrb2-1,iSpin)) &
+             & - ss(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) * aimag(ee(iOrig:iOrig+nOrb1*nOrb2-1,iSpin))
+        if (iAtom2f == iAtom2) then
+           print *,'orbCurrentsPrim(1:nOrb1*nOrb2)',orbCurrentsPrim(1:nOrb1*nOrb2)
+           print *,'hh',hh(iOrig:iOrig+nOrb1*nOrb2-1,iSpin)
+           print *,'hh',aimag(rhoPrim(iOrig:iOrig+nOrb1*nOrb2-1,iSpin))
+           print *,'ss',ss(iOrig:iOrig+nOrb1*nOrb2-1,iSpin)
+           print *,'ee',aimag(ee(iOrig:iOrig+nOrb1*nOrb2-1,iSpin))
+         end if
+        this%atomCurrents(iAtom1,iAtom2) = this%atomCurrents(iAtom1,iAtom2) - 4.0 * sum(orbCurrentsPrim(1:nOrb1*nOrb2))
       end do
     end do
+    end do
 
-    deallocate(T1, T2, T3)
+!    do iKS = 1, this%parallelKS%nLocalKS
+!       iK = this%parallelKS%localKS(1, iKS)
+!
+!      ! build E = S^{-1} H \rho
+!      call gemm(T1, this%Sinv(:,:,iKS), this%H1(:,:,iKS))
+!      call gemm(T2, T1, rho(:,:,iKS)) ! E(k) = T2 here
+!
+!      ! T2 = S.Im(E), since S is defined as complex, we take real part
+!      call gemm(T3, real(this%Ssqr(:,:,iKS)), aimag(T2), transB='t')
+!      ! T2 = - ( H Im(\rho) - S Im(E) ), this has a minus sign already
+!      ! since H is defined as complex, and S.Im(E) is real, we take real part
+!      call gemm(T3, real(this%H1(:,:,iKS)), aimag(rho(:,:,iKS)), alpha=-1.0_dp, transB='t')
+!
+!      ! I = -4*e/hbar (H Im(\rho) - S*Im(E)), the minus sign is already included
+!      ! and e = hbar = 1
+!      this%orbCurrents(:,:) = this%orbCurrents + 4.0_dp * this%kWeight(iK) * T3
+!    end do
+
+!    do iAt1 = 1, this%nAtom
+!      do iAt2 = 1, this%nAtom
+!        iStart1 = iSquare(iAt1)
+!        iEnd1 = iSquare(iAt1+1)-1
+!        iStart2 = iSquare(iAt2)
+!        iEnd2 = iSquare(iAt2+1)-1
+!        this%atomCurrents(iAt1,iAt2) = sum(this%orbCurrents(iStart1:iEnd1, iStart2:iEnd2))
+!      end do
+!    end do
+
+    deallocate(T1, T2) !, T3)
+    deallocate(rhoPrim, hh, ss, ee)
 
   end subroutine getTdCurrents
 
@@ -3859,6 +3940,7 @@ contains
     end if
 
     this%nAtom = size(coord, dim=2)
+    this%nAllAtom = size(coordAll, dim=2)
     this%latVec = latVec
     this%invLatVec = invLatVec
     this%iCellVec = iCellVec
@@ -3888,7 +3970,7 @@ contains
     allocate(this%chargePerShell(orb%mShell,this%nAtom,this%nSpin))
     if (this%tCurrents) then
       allocate(this%orbCurrents(this%nOrbs, this%nOrbs))
-      allocate(this%atomCurrents(this%nAtom, this%nAtom))
+      allocate(this%atomCurrents(this%nAtom, this%nAllAtom))
     end if
     if (this%tUseVectorPotential) then
       allocate(this%hamCmplx(size(ints%hamiltonian, dim=1), size(ints%hamiltonian, dim=2)))
@@ -4028,7 +4110,8 @@ contains
         & qDepExtPot, this%qBlock, dftbu, xi, iAtInCentralRegion, tFixEf, Ef, onSiteElements)
 
     if (this%tCurrents) then
-      call getTdCurrents(this, this%trho, iSquare)
+      call getTdCurrents(this, this%trho, iSquare, neighbourList, nNeighbourSK, orb,&
+          & iSparseStart, img2CentCell)
     end if
 
     if (.not. this%tReadRestart .or. this%tProbe) then
@@ -4250,7 +4333,8 @@ contains
         & qDepExtPot, this%qBlock, dftbU, xi, iAtInCentralRegion, tFixEf, Ef, onSiteElements)
 
     if (this%tCurrents .and. mod(iStep, this%writeFreq) == 0) then
-      call getTdCurrents(this, this%rho, iSquare)
+      call getTdCurrents(this, this%rho, iSquare, neighbourList, nNeighbourSK, orb,&
+          & iSparseStart, img2CentCell)
     end if
 
     if ((mod(iStep, this%writeFreq) == 0)) then
