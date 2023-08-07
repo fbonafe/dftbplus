@@ -206,6 +206,9 @@ module dftbp_timedep_timeprop
     !> if initial fillings are provided in an external file
     logical :: tFillingsFromFile
 
+    !> if the isntantanous basis should be used for calculating populations
+    logical :: tUpdateProjBasis
+
   end type TElecDynamicsInp
 
   !> Data type for electronic dynamics internal settings
@@ -295,7 +298,7 @@ module dftbp_timedep_timeprop
     logical, public :: tdFieldThroughAPI = .false.
     logical, public :: tdCoordsAndVelosAreSet = .false.
     logical, public :: tdCoordsAndVelosThroughAPI = .false.
-    logical, public :: tIons
+    logical, public :: tIons, tUpdateProjBasis
     real(dp), allocatable, public :: coordNew(:,:), movedVelo(:,:)
     integer, allocatable, public :: indMovedAtom(:)
     type(TEnergies), public :: energy
@@ -475,6 +478,8 @@ contains
     this%kPoint = kPoint
     this%KWeight = KWeight
     this%hamiltonianType = hamiltonianType
+    this%tUpdateProjBasis = inp%tUpdateProjBasis
+
     allocate(this%parallelKS, source=parallelKS)
     allocate(this%populDat(this%parallelKS%nLocalKS))
     if (.not.any([allocated(sccCalc), allocated(tblite)])) then
@@ -563,6 +568,7 @@ contains
       this%nMovedAtom = inp%nMovedAtom
       tempAtom = inp%tempAtom
       tMDstill = .false.
+      this%tUpdateProjBasis = .true.
 
       allocate(this%movedVelo(3, this%nMovedAtom))
       allocate(this%movedMass(3, this%nMovedAtom))
@@ -2569,7 +2575,7 @@ contains
   end subroutine tdPopulInit
 
 
-  ! updates Eiginv and EiginvAdj if nuclear dynamics is done
+  ! updates Eiginv and EiginvAdj if nuclear dynamics is done or if the update was requested
   ! important to call after H1 has been updated with new charges and before D is included in H1
   subroutine updateBasisMatrices(this, env, electronicSolver, Eiginv, EiginvAdj, H1, Ssqr,&
       & errStatus)
@@ -2593,15 +2599,15 @@ contains
     complex(dp), intent(in) :: H1(:,:,:)
 
     !> Square overlap matrix
-    complex(dp), intent(inout) :: Ssqr(:,:,:)
+    complex(dp), intent(in) :: Ssqr(:,:,:)
 
     !> Error status
     type(TStatus), intent(out) :: errStatus
 
     !> Auxiliary matrix
-    complex(dp), allocatable :: T1(:,:)
+    complex(dp), allocatable :: T1(:,:), T3(:,:)
 
-    !> Auxiliary matrix
+    !> Auxiliary matrices
     real(dp), allocatable :: T2(:,:)
 
     !> K-Spin mixed index
@@ -2611,10 +2617,12 @@ contains
 
     allocate(T1(this%nOrbs,this%nOrbs))
     allocate(T2(this%nOrbs,this%nOrbs))
+    allocate(T3(this%nOrbs,this%nOrbs))
     do iKS = 1, this%parallelKS%nLocalKS
       !check if this works with both complex and real
       T1(:,:) = H1(:,:,iKS)
-      call diagDenseMtx(env, electronicSolver, 'V', T1, Ssqr(:,:,iKS), eigen, errStatus)
+      T3(:,:) = Ssqr(:,:,iKS)
+      call diagDenseMtx(env, electronicSolver, 'V', T1, T3, eigen, errStatus)
       @:PROPAGATE_ERROR(errStatus)
       if (this%tRealHS) then
         T2(:,:) = real(T1, dp)
@@ -2623,7 +2631,7 @@ contains
         call tdPopulInit(this, Eiginv(:,:,iKS), EiginvAdj(:,:,iKS), eigvecsCplx=T1)
       end if
     end do
-    deallocate(T1, T2)
+    deallocate(T1, T2, T3)
 
   end subroutine updateBasisMatrices
 
@@ -4053,14 +4061,15 @@ contains
       case(hamiltonianTypes%xtb)
         @:RAISE_ERROR(errStatus, -1, "Nuclei dynamic not implemented for xTB Hamiltonian yet")
       end select
-      if ((this%tPopulations) .and. (mod(iStep, this%writeFreq) == 0)) then
-        call updateBasisMatrices(this, env, electronicSolver, this%Eiginv, this%EiginvAdj, this%H1,&
-            & this%Ssqr, errStatus)
-        @:PROPAGATE_ERROR(errStatus)
-      end if
 
       call getPositionDependentEnergy(this, this%energy, coordAll, img2CentCell, nNeighbourSK,&
           & neighbourList, repulsive, iAtInCentralRegion, rangeSep)
+    end if
+
+    if (this%tUpdateProjBasis .and. (this%tPopulations) .and. (mod(iStep, this%writeFreq) == 0)) then
+       call updateBasisMatrices(this, env, electronicSolver, this%Eiginv, this%EiginvAdj, this%H1,&
+            & this%Ssqr, errStatus)
+       @:PROPAGATE_ERROR(errStatus)
     end if
 
     call getTDEnergy(this, env, this%energy, this%rhoPrim, this%rho, neighbourList, nNeighbourSK, orb,&
