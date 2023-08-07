@@ -206,9 +206,11 @@ module dftbp_timedep_timeprop
     !> if initial fillings are provided in an external file
     logical :: tFillingsFromFile
 
-    !> if the isntantanous basis should be used for calculating populations
+    !> if the instantanous basis should be used for calculating populations
     logical :: tUpdateProjBasis
 
+    !> if the instantanous eigenvalues of the SCC Hamiltonian should be printed
+    logical :: tEigenvalues
   end type TElecDynamicsInp
 
   !> Data type for electronic dynamics internal settings
@@ -282,7 +284,7 @@ module dftbp_timedep_timeprop
     complex(dp), allocatable :: Eiginv(:,:,:), EiginvAdj(:,:,:)
     real(dp), allocatable :: bondWork(:, :)
     real(dp) :: time, startTime, timeElec, energyKin, lastBondPopul
-    type(TFileDescr), allocatable :: populDat(:)
+    type(TFileDescr), allocatable :: populDat(:), eigenDat(:)
     type(TFileDescr) :: dipoleDat, qDat, energyDat, atomEnergyDat
     type(TFileDescr) :: forceDat, coorDat, fdBondPopul, fdBondEnergy
     type(TPotentials) :: potential
@@ -298,7 +300,7 @@ module dftbp_timedep_timeprop
     logical, public :: tdFieldThroughAPI = .false.
     logical, public :: tdCoordsAndVelosAreSet = .false.
     logical, public :: tdCoordsAndVelosThroughAPI = .false.
-    logical, public :: tIons, tUpdateProjBasis
+    logical, public :: tIons, tUpdateProjBasis, tEigenvalues
     real(dp), allocatable, public :: coordNew(:,:), movedVelo(:,:)
     integer, allocatable, public :: indMovedAtom(:)
     type(TEnergies), public :: energy
@@ -479,9 +481,11 @@ contains
     this%KWeight = KWeight
     this%hamiltonianType = hamiltonianType
     this%tUpdateProjBasis = inp%tUpdateProjBasis
+    this%tEigenvalues = inp%tEigenvalues
 
     allocate(this%parallelKS, source=parallelKS)
     allocate(this%populDat(this%parallelKS%nLocalKS))
+    allocate(this%eigenDat(this%parallelKS%nLocalKS))
     if (.not.any([allocated(sccCalc), allocated(tblite)])) then
       @:RAISE_ERROR(errStatus, -1, "SCC calculations are currently required for dynamics")
     end if
@@ -631,6 +635,17 @@ contains
     this%mCutoff = mCutoff
     if (allocated(atomEigVal)) then
       allocate(this%atomEigVal, source=atomEigVal)
+    end if
+
+    if (this%tEigenvalues) then
+      if (.not. this%tPopulations) then
+        call warning('The eigenvalues will not be calculated because populations have not been requested.&
+            & In order to print eigenvalues, set Populations = Yes.')
+      elseif (.not. this%tUpdateProjBasis) then
+        call warning('The eigenvalues have been requested, this implies that the instantanous states &
+             & will be used for calculating the projections.')
+        this%tUpdateProjBasis = .true.
+      end if
     end if
 
     this%tPump = inp%tPump
@@ -2143,7 +2158,7 @@ contains
 
 
   !> Initialize output files
-  subroutine initTDOutput(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat,&
+  subroutine initTDOutput(this, dipoleDat, qDat, energyDat, populDat, eigenDat, forceDat, coorDat,&
       & atomEnergyDat)
 
     !> ElecDynamics instance
@@ -2160,6 +2175,9 @@ contains
 
     !> Populations  output file ID
     type(TFileDescr), intent(out) :: populDat(:)
+
+    !> Populations  output file ID
+    type(TFileDescr), intent(out) :: eigenDat(:)
 
     !> Forces output file ID
     type(TFileDescr), intent(out) :: forceDat
@@ -2264,6 +2282,27 @@ contains
       end do
     end if
 
+    if (this%tEigenvalues) then
+      do iKS = 1, this%parallelKS%nLocalKS
+        iSpin = this%parallelKS%localKS(2, iKS)
+        write(strSpin,'(i1)')iSpin
+        if (this%tRealHS) then
+          call openOutputFile(this, eigenDat(iKS), 'eigenvals' // trim(strSpin) // '.dat')
+        else
+          iK = this%parallelKS%localKS(1, iKS)
+          write(strK,'(i0.3)')iK
+          call openOutputFile(this, eigenDat(iKS), 'eigenvals' // trim(strSpin) // '-' // trim(strK) //&
+              & '.dat')
+        end if
+        write(eigenDat(iKS)%unit, "(A,A)") "#  Instantanous eigenvalues of the Hamiltonian, spin channel : ",&
+            & trim(strSpin)
+        write(eigenDat(iKS)%unit, "(A)", advance = "NO")"#          time (fs)            |"
+        write(eigenDat(iKS)%unit, "(A)", advance = "NO")"   eigenval 1       |"
+        write(eigenDat(iKS)%unit, "(A)", advance = "NO")"    eigenval 2      |         ...     "
+        write(eigenDat(iKS)%unit, "(A)")
+      end do
+    end if
+
     iErr = -999
     if (this%tPump) then
       call execute_command_line("mkdir "//trim(pumpFilesDir), exitstat=iErr)
@@ -2287,7 +2326,7 @@ contains
 
 
   !> Close output files
-  subroutine closeTDOutputs(this, dipoleDat, qDat, energyDat, populDat, forceDat, coorDat,&
+  subroutine closeTDOutputs(this, dipoleDat, qDat, energyDat, populDat, eigenDat, forceDat, coorDat,&
       & fdBondPopul, fdBondEnergy, atomEnergyDat)
 
     !> ElecDynamics instance
@@ -2304,6 +2343,9 @@ contains
 
     !> Populations output file ID
     type(TFileDescr), intent(inout) :: populDat(:)
+
+    !> Populations output file ID
+    type(TFileDescr), intent(inout) :: eigenDat(:)
 
     !> Forces output file ID
     type(TFileDescr), intent(inout) :: forceDat
@@ -2326,6 +2368,7 @@ contains
     call closeFile(forceDat)
     call closeFile(coorDat)
     call closeFile(populDat)
+    call closeFile(eigenDat)
     call closeFile(fdBondPopul)
     call closeFile(fdBondEnergy)
     call closeFile(atomEnergyDat)
@@ -2578,7 +2621,7 @@ contains
   ! updates Eiginv and EiginvAdj if nuclear dynamics is done or if the update was requested
   ! important to call after H1 has been updated with new charges and before D is included in H1
   subroutine updateBasisMatrices(this, env, electronicSolver, Eiginv, EiginvAdj, H1, Ssqr,&
-      & errStatus)
+      & time, eigenDat, errStatus)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(in) :: this
@@ -2601,6 +2644,12 @@ contains
     !> Square overlap matrix
     complex(dp), intent(in) :: Ssqr(:,:,:)
 
+    !> Elapsed simulation time
+    real(dp), intent(in) :: time
+
+    !> Eigenvalues output file ID
+    type(TFileDescr), intent(in) :: eigenDat(:)
+
     !> Error status
     type(TStatus), intent(out) :: errStatus
 
@@ -2614,6 +2663,7 @@ contains
     integer :: iKS
 
     real(dp) :: eigen(this%nOrbs)
+    integer :: ii
 
     allocate(T1(this%nOrbs,this%nOrbs))
     allocate(T2(this%nOrbs,this%nOrbs))
@@ -2629,6 +2679,14 @@ contains
         call tdPopulInit(this, Eiginv(:,:,iKS), EiginvAdj(:,:,iKS), T2)
       else
         call tdPopulInit(this, Eiginv(:,:,iKS), EiginvAdj(:,:,iKS), eigvecsCplx=T1)
+      end if
+
+      if (this%tEigenvalues) then
+        write(eigenDat(iKS)%unit,'(*(2x,F25.15))', advance='no') time * au__fs
+        do ii = 1, size(eigen)
+          write(eigenDat(iKS)%unit,'(*(2x,F25.15))', advance='no') eigen(ii)
+        end do
+        write(eigenDat(iKS)%unit,*)
       end if
     end do
     deallocate(T1, T2, T3)
@@ -3780,7 +3838,7 @@ contains
     end if
 
     call initTDOutput(this, this%dipoleDat, this%qDat, this%energyDat,&
-        & this%populDat, this%forceDat, this%coorDat, this%atomEnergyDat)
+        & this%populDat, this%eigenDat, this%forceDat, this%coorDat, this%atomEnergyDat)
 
     ! Write density at t=0
     if (this%tPump .and. .not. this%tReadRestart) then
@@ -4068,7 +4126,7 @@ contains
 
     if (this%tUpdateProjBasis .and. (this%tPopulations) .and. (mod(iStep, this%writeFreq) == 0)) then
        call updateBasisMatrices(this, env, electronicSolver, this%Eiginv, this%EiginvAdj, this%H1,&
-            & this%Ssqr, errStatus)
+            & this%Ssqr, this%time, this%eigenDat, errStatus)
        @:PROPAGATE_ERROR(errStatus)
     end if
 
@@ -4203,7 +4261,7 @@ contains
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
 
-    call closeTDOutputs(this, this%dipoleDat, this%qDat, this%energyDat, this%populDat,&
+    call closeTDOutputs(this, this%dipoleDat, this%qDat, this%energyDat, this%populDat, this%eigenDat,&
         & this%forceDat, this%coorDat, this%fdBondPopul, this%fdBondEnergy, this%atomEnergyDat)
 
     deallocate(this%Ssqr)
