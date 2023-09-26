@@ -475,6 +475,7 @@ contains
     this%kPoint = kPoint
     this%KWeight = KWeight
     this%hamiltonianType = hamiltonianType
+    this%tVerbose = inp%tVerbose
     allocate(this%parallelKS, source=parallelKS)
     allocate(this%populDat(this%parallelKS%nLocalKS))
     if (.not.any([allocated(sccCalc), allocated(tblite)])) then
