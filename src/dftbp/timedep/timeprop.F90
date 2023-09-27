@@ -305,7 +305,7 @@ module dftbp_timedep_timeprop
     real(dp), public :: dt
     integer, public :: nSteps
     !> Dense matrix descriptor
-    type(TDenseDescr), intent(in) :: denseDesc
+    type(TDenseDescr) :: denseDesc
 
   end type TElecDynamics
 
