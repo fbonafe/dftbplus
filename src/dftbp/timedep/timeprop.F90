@@ -67,6 +67,7 @@ module dftbp_timedep_timeprop
   use dftbp_solvation_fieldscaling, only : TScaleExtEField
   use dftbp_timedep_dynamicsrestart, only : writeRestartFile, readRestartFile
   use dftbp_type_commontypes, only : TParallelKS, TOrbitals
+  use dftbp_type_densedescr, only: TDenseDescr
   use dftbp_type_integral, only : TIntegral
   use dftbp_type_multipole, only : TMultipole, TMultipole_init
 #:if WITH_MBD
@@ -303,6 +304,8 @@ module dftbp_timedep_timeprop
     real(dp), public :: presentField(3)
     real(dp), public :: dt
     integer, public :: nSteps
+    !> Dense matrix descriptor
+    type(TDenseDescr), intent(in) :: denseDesc
 
   end type TElecDynamics
 
@@ -367,7 +370,7 @@ contains
   subroutine TElecDynamics_init(this, inp, species, speciesName, tWriteAutotest, autotestTag,&
       & randomThermostat, mass, nAtom, skCutoff, mCutoff, atomEigVal, dispersion, nonSccDeriv,&
       & tPeriodic, parallelKS, tRealHS, kPoint, kWeight, isRangeSep, sccCalc, tblite,&
-      & eFieldScaling, hamiltonianType, errStatus)
+      & eFieldScaling, hamiltonianType, errStatus, denseDesc)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(out) :: this
@@ -450,6 +453,9 @@ contains
     !> Error status
     type(TStatus), intent(out) :: errStatus
 
+    !> Dense matrix descriptor
+    type(TDenseDescr), intent(in) :: denseDesc
+
     real(dp) :: norm, tempAtom
     logical :: tMDstill
     integer :: iAtom
@@ -486,6 +492,8 @@ contains
     if (allocated(tblite)) then
       this%tblite = tblite
     end if
+    ! we assume denseDesc is allocated
+    this%denseDesc = denseDesc
 
     if (inp%envType /= envTypes%constant) then
       this%time0 = inp%time0
@@ -1714,7 +1722,7 @@ contains
       & eigvecsReal, filling, orb, rhoPrim, potential, iNeighbour, nNeighbourSK, iSquare,&
       & iSparseStart, img2CentCell, Eiginv, EiginvAdj, energy, ErhoPrim, skOverCont, qBlock,&
       & qNetAtom, isDftbU, onSiteElements, eigvecsCplx, H1LC, bondWork, fdBondEnergy, fdBondPopul,&
-      & lastBondPopul, time)
+      & lastBondPopul, time, env)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
@@ -1824,6 +1832,9 @@ contains
     !> simulation time (in atomic units)
     real(dp), intent(in) :: time
 
+    !> Environment settings
+    type(TEnvironment), intent(in) :: env
+
     real(dp), allocatable :: T2(:,:), T3(:,:)
     complex(dp), allocatable :: T4(:,:)
     integer :: iSpin, iOrb, iOrb2, iKS, iK
@@ -1835,13 +1846,23 @@ contains
     allocate(ham0(size(H0)))
     ham0(:) = H0
 
+    ! implement nLocalRows and nLocalCols in the same way as
+    ! in initializeDynamics
+    ! (get them from size())
     if (this%tRealHS) then
       allocate(T2(this%nOrbs,this%nOrbs))
+!      allocate(T2(nLocalRows,nLocalCols))
       allocate(T3(this%nOrbs, this%nOrbs))
     else
       allocate(T4(this%nOrbs,this%nOrbs))
     end if
 
+    ! if scalapack
+    !call unpackHSRealBlacs(env%blacs, ints%overlap, iNeighbour,&
+    ! & nNeighbourSK, iSparseStart, img2CentCell, this%denseDesc, T2)
+    
+    !else
+    
     if (.not. this%tReadRestart) then
       Ssqr(:,:,:) = 0.0_dp
       Sinv(:,:,:) = 0.0_dp
@@ -1924,6 +1945,10 @@ contains
         iK = this%parallelKS%localKS(1, iKS)
         iSpin = this%parallelKS%localKS(2, iKS)
         if (this%tRealHS) then
+          ! if scalapack
+          ! call makeDensityMtxRealBlacs(env%blacs%orbitalGrid, denseDesc%blacsOrbSqr, filling(:,iSpin),&
+          ! & eigvecs(:,:,iKS), work)
+
           T2(:,:) = 0.0_dp
           call makeDensityMatrix(T2, eigvecsReal(:,:,iKS), filling(:,1,iSpin))
           rho(:,:,iKS) = cmplx(T2, 0, dp)
@@ -3710,17 +3735,38 @@ contains
     call TMultipole_init(this%multipole, this%nAtom, this%nDipole, this%nQuadrupole, &
         & this%nSpin)
 
+    ! allocate differently if scalapack
+    ! check allocateDenseMatrices(this, env) in initprogram
+!    nLocalKS = size(this%parallelKS%localKS, dim=2)
+!  #:if WITH_SCALAPACK
+!    get local shape from shape(eigvecsReal) nLocalRows, nLocalCols
+!    nLocalRows = algo
+!    nLocalCols = algo2
+!  #:else
+!    nLocalRows = this%denseDesc%fullSize
+!    nLocalCols = this%denseDesc%fullSize
+!  #:endif
+
+!   uncomment this
+!    allocate(this%trho(nLocalRows,nLocalCols,this%parallelKS%nLocalKS))
+!    allocate(this%trhoOld(nLocalRows,nLocalCols,this%parallelKS%nLocalKS))
+!    allocate(this%Ssqr(nLocalRows,nLocalCols,this%parallelKS%nLocalKS))
+!    allocate(this%Sinv(nLocalRows,nLocalCols,this%parallelKS%nLocalKS))
+!    allocate(this%H1(nLocalRows,nLocalCols,this%parallelKS%nLocalKS))
+
+!   delete this
     allocate(this%trho(this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
     allocate(this%trhoOld(this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
     allocate(this%Ssqr(this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
     allocate(this%Sinv(this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
+    allocate(this%H1(this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
+    
     if (this%nDipole > 0) then
       allocate(this%Dsqr(this%nDipole,this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
     end if
     if (this%nQuadrupole > 0) then
       allocate(this%Qsqr(this%nQuadrupole,this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
     end if
-    allocate(this%H1(this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
     allocate(this%qq(orb%mOrb, this%nAtom, this%nSpin))
     allocate(this%deltaQ(this%nAtom,this%nSpin))
     allocate(this%dipole(3,this%nSpin))
@@ -3765,7 +3811,7 @@ contains
         & neighbourList%iNeighbour, nNeighbourSK, iSquare, iSparseStart, img2CentCell,&
         & this%Eiginv, this%EiginvAdj, this%energy, this%ErhoPrim, skOverCont, this%qBlock,&
         & this%qNetAtom, allocated(dftbU), onSiteElements, eigvecsCplx, this%H1LC, this%bondWork, &
-        & this%fdBondEnergy, this%fdBondPopul, this%lastBondPopul, this%time)
+        & this%fdBondEnergy, this%fdBondPopul, this%lastBondPopul, this%time, env)
 
     if (this%tPeriodic) then
       call initLatticeVectors(this, boundaryCond)

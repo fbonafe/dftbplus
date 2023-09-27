@@ -3672,9 +3672,9 @@ contains
         call error("Electron dynamics is not compatibile with this spinor Hamiltonian")
       end if
 
-      if (withMpi) then
-        call error("Electron dynamics does not work with MPI yet")
-      end if
+!      if (withMpi) then
+!        call error("Electron dynamics does not work with MPI yet")
+!      end if
 
       if (this%tFixEf) then
         call error("Electron dynamics does not work with fixed Fermi levels yet")
@@ -3712,7 +3712,7 @@ contains
           & this%nAtom, this%cutOff%skCutoff, this%cutOff%mCutoff, this%atomEigVal,&
           & this%dispersion, this%nonSccDeriv, this%tPeriodic, this%parallelKS, this%tRealHS,&
           & this%kPoint, this%kWeight, this%isRangeSep, this%scc, this%tblite, this%eFieldScaling,&
-          & this%hamiltonianType, errStatus)
+          & this%hamiltonianType, errStatus, this%denseDesc)
       if (errStatus%hasError()) then
         call error(errStatus%message)
       end if
