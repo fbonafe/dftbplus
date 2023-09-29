@@ -1006,6 +1006,11 @@ contains
        & iAtInCentralRegion, tFixEf, Ef, electronicSolver, qDepExtPot, errStatus)
       @:PROPAGATE_ERROR(errStatus)
 
+      print *, 'RHO OLD'
+      print *, this%rhoOld
+      print *, 'RHO NEW'
+      print *, this%rho
+
       if (mod(iStep, max(this%nSteps / 10, 1)) == 0) then
         call loopTime%stop()
         this%timeElec  = loopTime%getWallClockTime()
@@ -1206,8 +1211,10 @@ contains
     end if
 
     ! Check if we need to apply Peierls phase to opverlap matrix
-    if (this%tUseVectorPotential) then
+    if (this%tUseVectorPotential) then      ! apply Peierls phase 
       this%hamCmplx(:,:) = ints%hamiltonian ! real to complex
+      print *, 'DEBUGGING tdVecPot'
+      print *, this%tdVecPot(:,iStep)
       do iAtom1 = 1, this%nAtom
         ii = iSquare(iAtom1)
         nOrb1 = iSquare(iAtom1 + 1) - ii
@@ -1302,6 +1309,8 @@ contains
         H1(:,:,iSpin) = H1(:,:,iSpin) + H1LC
       end do
     end if
+
+  !printear H1 para check H1 = H_gs
 
   end subroutine updateH
 
@@ -3924,6 +3933,10 @@ contains
 
     real(dp), allocatable :: velInternal(:,:)
 
+    integer :: iSpin, iAtom1, iNeigh, iAtom2, iAtom2f, iEnd1, iEnd2
+    integer :: ii, jj, nOrb1, nOrb2, iOrig, iStart1, iStart2, iOrb
+    complex(dp), allocatable :: T4(:,:)
+
     this%startTime = 0.0_dp
     this%timeElec = 0.0_dp
 
@@ -4010,9 +4023,12 @@ contains
       call getTDFunction(this, this%startTime)
     end if
     if (this%tKick .and. this%tUseVectorPotential) then
-      ! initialize tdVecPot array, needed when calling updateH
+      ! initialize tdVecPot array, needed when calling updateH for the Peierls phase
       allocate(this%tdVecPot(3, 0:this%nSteps))
-      this%tdVecPot = 0.0_dp
+!      this%tdVecPot = 0.0_dp                       !so H1 = H_gs
+       this%tdVecPot(this%currPolDir,:) = -c * this%field
+       print *, 'DEBUGGING tdVecPot'
+       print *, this%tdVecPot(this%currPolDir,0)
     end if
 
     call initializeTDVariables(this, this%trho, this%H1, this%Ssqr, this%Sinv, H0, this%ham0, &
@@ -4062,6 +4078,9 @@ contains
       call this%dispersion%updateOnsiteCharges(this%qNetAtom, orb, referenceN0,&
           & this%speciesAll(:this%nAtom), .true.)
     end if
+    
+    print *, 'H1 previous updateH'
+    print *, this%H1
 
     call updateH(this, this%H1, ints, this%ham0, this%speciesAll, this%qq, q0, coord, orb,&
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, 0,&
@@ -4069,6 +4088,42 @@ contains
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
         & this%dispersion, this%trho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
+
+    print *, 'H1 after updateH'
+    print *, this%H1
+
+    ! in case of vector potential apply Peierls phase to the overlap after first updateH
+    if (this%tUseVectorPotential .and. this%tKick) then
+      allocate(T4(this%nOrbs,this%nOrbs))
+      do iAtom1 = 1, this%nAtom
+        iStart1 = iSquare(iAtom1)
+        iEnd1 = iSquare(iAtom1+1)-1
+        do iNeigh = 1, nNeighbourSK(iAtom1)
+          iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
+          iAtom2f = img2CentCell(iAtom2)
+          iStart2 = iSquare(iAtom2f)
+          iEnd2 = iSquare(iAtom2f+1)-1
+          do iKS = 1, this%parallelKS%nLocalKS
+            ! filling one side of the block
+            this%Ssqr(iStart1:iEnd1,iStart2:iEnd2,iKS) = this%Ssqr(iStart1:iEnd1,iStart2:iEnd2,iKS) &
+              & * exp(-imag/c *dot_product(this%tdVecPot(:,0),(coord(:,iAtom1)-coord(:,iAtom2f))))
+            ! filling transpose block
+            this%Ssqr(iStart2:iEnd2,iStart1:iEnd1,iKS) = this%Ssqr(iStart2:iEnd2,iStart1:iEnd1,iKS) &
+              & * exp(-imag/c *dot_product(this%tdVecPot(:,0),(coord(:,iAtom2f)-coord(:,iAtom1))))
+          end do
+        end do
+      end do
+      !invert overlap
+      do iKS = 1, this%parallelKS%nLocalKS
+        this%Sinv(:,:,iKS) = cmplx(0,0,dp)
+        T4 = this%Ssqr(:,:,iKS)
+        do iOrb = 1, this%nOrbs
+          this%Sinv(iOrb, iOrb, iKS) = 1.0_dp
+        end do
+        call gesv(T4(:,:), this%Sinv(:,:,iKS))
+      end do
+      deallocate(T4)
+    end if
 
     if (this%tForces) then
       this%totalForce(:,:) = 0.0_dp
@@ -4095,9 +4150,11 @@ contains
     ! Apply kick to rho if necessary (in restart case, check it starttime is 0 or not)
     if (this%tKick .and. this%startTime < this%dt / 10.0_dp) then
       if (.not. this%tUseVectorPotential) then
-        call kickDM(this, this%trho, this%Ssqr, this%Sinv, iSquare, coord)
+        call kickDM(this, this%trho, this%Ssqr, this%Sinv, iSquare, coord)       !Rho ya esta kickeada en este caso
       else
-        this%tdVecPot(this%currPolDir,:) = -c * this%field
+!        this%tdVecPot(this%currPolDir,:) = -c * this%field                      !PRUEBA
+!        print *, 'DEBUGGING tdVecPot'
+!        print *, this%tdVecPot(this%currPolDir,0)
       end if
     end if
 
@@ -4136,6 +4193,11 @@ contains
 
     this%rho => this%trho
     this%rhoOld => this%trhoOld
+
+    print *, 'RHO before kick'
+    print *, this%rhoOld
+    print *, 'RHO after kick'
+    print *, this%rho
 
     if (this%tIons) then
       coord(:,:) = this%coordNew
