@@ -2255,7 +2255,7 @@ contains
     type(TFileDescr), intent(out) :: atomEnergyDat
 
     !> Tdcurrents  output file ID
-    integer, intent(out) :: currentDat
+    type(TFileDescr), intent(out) :: currentDat
 
     character(20) :: dipoleFileName
     character(1) :: strSpin
@@ -2327,7 +2327,7 @@ contains
     end if
 
     if (this%tCurrents) then
-      call openFile(this, currentDat, 'tdcurrents.dat')
+      call openOutputFile(this, currentDat, 'tdcurrents.dat')
     end if
 
     if (this%tPopulations) then
@@ -2403,7 +2403,7 @@ contains
     type(TFileDescr), intent(inout) :: coorDat
 
     !> Tdcurrents output file ID
-    integer, intent(in) :: currentDat
+    type(TFileDescr), intent(inout) :: currentDat
 
     !> Pairwise bond population output file ID
     type(TFileDescr), intent(inout) :: fdBondPopul
@@ -2502,7 +2502,7 @@ contains
     type(TFileDescr), intent(in) :: energyDat
 
     !> tdcurrents output file ID
-    integer, intent(in) :: currentDat
+    type(TFileDescr), intent(in) :: currentDat
 
     !> Elapsed simulation time
     real(dp), intent(in) :: time
@@ -2593,22 +2593,22 @@ contains
     end if
 
     if (this%tCurrents .and. mod(iStep, this%writeFreq) == 0) then
-      write(currentDat, "(2X,2F25.15)", advance="no") time * au__fs
+      write(currentDat%unit, "(2X,2F25.15)", advance="no") time * au__fs
       do iAtom = 1, this%nAtom
         do iAtom2 = 1, this%nAllAtom
-          write(currentDat, "(F25.15)", advance="no")this%atomCurrents(iAtom, iAtom2)
+          write(currentDat%unit, "(F25.15)", advance="no")this%atomCurrents(iAtom, iAtom2)
         end do
       end do
-      write(currentDat,*)
+      write(currentDat%unit,*)
     end if
 
     ! Flush output every 5% of the simulation
     if (mod(iStep, max(this%nSteps / 20, 1)) == 0 .and. iStep > this%writeFreq) then
       if (this%tdWriteExtras) then
-        flush(qDat)
-        flush(energyDat)
+        flush(qDat%unit)
+        flush(energyDat%unit)
         if (this%tCurrents) then
-          flush(currentDat)
+          flush(currentDat%unit)
         end if
         if (this%tIons) then
           flush(coorDat%unit)
@@ -3934,7 +3934,7 @@ contains
     real(dp), allocatable :: velInternal(:,:)
 
     integer :: iSpin, iAtom1, iNeigh, iAtom2, iAtom2f, iEnd1, iEnd2
-    integer :: ii, jj, nOrb1, nOrb2, iOrig, iStart1, iStart2, iOrb
+    integer :: ii, jj, nOrb1, nOrb2, iOrig, iStart1, iStart2, iOrb, iKS
     complex(dp), allocatable :: T4(:,:)
 
     this%startTime = 0.0_dp
