@@ -2123,6 +2123,7 @@ contains
     !> Range separation contributions
     type(TRangeSepFunc), allocatable, intent(inout) :: rangeSep
 
+
     integer :: iKS
     complex(dp), allocatable :: RdotSprime(:,:)
 
@@ -2147,8 +2148,14 @@ contains
       else
         ! The following line is commented to make the fast propagate work since it needs a real H
         !H1(:,:,iKS) = imag * H1(:,:,iKS)
+        #:if WITH_SCALAPACK
+        call propagateRhoRealHBlacs(this, rhoNew(:,:,iKS), rho(:,:,iKS), H1(:,:,iKS), Sinv(:,:,iKS), &
+        & step)     
+        #:else
         call propagateRhoRealH(this, rhoNew(:,:,iKS), rho(:,:,iKS), H1(:,:,iKS), Sinv(:,:,iKS),&
             & step)
+        #:endif
+
       end if
     end do
 
@@ -2189,7 +2196,7 @@ contains
 
   !> Propagate rho with Scalapack for real Hamiltonian (used for frozen nuclei dynamics and gamma point periodic)
   #:if WITH_SCALAPACK
-  subroutine propagateRhoRealHBlacs(this, rhoOld, rho, H1, Sinv, step, eigvecsReal)
+  subroutine propagateRhoRealHBlacs(this, rhoOld, rho, H1, Sinv, step)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
@@ -2211,8 +2218,6 @@ contains
 
     real(dp), allocatable :: T1R(:,:), T2R(:,:), T3R(:,:),T4R(:,:)
 
-    !> Eigenvectors
-    real(dp), intent(in):: eigvecsReal(:,:)
     
     integer :: nLocalCols, nLocalRows
 
@@ -2223,8 +2228,8 @@ contains
     !allocate(T4R(this%nOrbs,this%nOrbs))
     !
     !NEW ALLOCATION 
-    nLocalRows = size(eigvecsReal, dim=1)
-    nLocalCols = size(eigvecsReal, dim=2)
+    nLocalRows = size(rho, dim=1)
+    nLocalCols = size(rho, dim=2)
     allocate(T1R(nLocalRows,nLocalCols))
     allocate(T2R(nLocalRows,nLocalCols))
     allocate(T3R(nLocalRows,nLocalCols))
