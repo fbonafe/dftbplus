@@ -269,6 +269,7 @@ module dftbp_timedep_timeprop
     real(dp), allocatable :: initCoord(:,:)
     complex(dp), allocatable :: Ssqr(:,:,:)
     complex(dp), allocatable :: Sinv(:,:,:)
+    complex(dp), allocatable :: Ssqr0(:,:,:)     !overlap matrix of the GS
     complex(dp), allocatable :: Dsqr(:,:,:,:)
     complex(dp), allocatable :: Qsqr(:,:,:,:)
     complex(dp), allocatable :: H1(:,:,:)
@@ -1226,8 +1227,9 @@ contains
           @:ASSERT(jj >= ii)
           nOrb2 = iSquare(iAtom2f + 1) - jj
           do iSpin = 1, this%nSpin
+            ! Replacing i/c by i since using SI units
             this%hamCmplx(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) = this%hamCmplx(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) &
-                 & * exp(-imag/c * dot_product(this%tdVecPot(:,iStep), (coordAll(:,iAtom2) - coordAll(:,iAtom1))))
+                 & * exp(-imag * dot_product(this%tdVecPot(:,iStep), (coordAll(:,iAtom2) - coordAll(:,iAtom1))))
           end do
         ! the order of the coords is bc this sparse array fills the square(jj:jj+nOrb2-1, ii:ii+nOrb1-1)
         ! before this was:
@@ -1314,6 +1316,69 @@ contains
 
   end subroutine updateH
 
+  !updates overlap matrix in case of vector potential adding Peirls phase
+  subroutine updateS(this, neighbourList, nNeighbourSK, img2CentCell, coord, iSquare, iStep)
+
+    !> ElecDynamics instance
+    type(TElecDynamics), intent(inout) :: this
+
+    !> list of neighbours for each atom
+    type(TNeighbourList), intent(inout) :: neighbourList
+
+    !> Number of neighbours for each of the atoms
+    integer, intent(inout) :: nNeighbourSK(:)
+
+    !> image atoms to their equivalent in the central cell
+    integer, allocatable, intent(inout) :: img2CentCell(:)
+
+    !> atomic coordinates
+    real(dp), allocatable, intent(inout) :: coord(:,:)
+
+    !> Index array for start of atomic block in dense matrices
+    integer, intent(in) :: iSquare(:)
+
+    !> current step of the propagation
+    integer, intent(in) :: iStep
+
+    integer :: iSpin, iAtom1, iNeigh, iAtom2, iAtom2f, iEnd1, iEnd2
+    integer :: ii, jj, nOrb1, nOrb2, iOrig, iStart1, iStart2, iOrb, iKS
+    complex(dp), allocatable :: T4(:,:)
+
+    if (this%tUseVectorPotential) then
+      allocate(T4(this%nOrbs,this%nOrbs))
+      do iAtom1 = 1, this%nAtom
+        iStart1 = iSquare(iAtom1)
+        iEnd1 = iSquare(iAtom1+1)-1
+        do iNeigh = 1, nNeighbourSK(iAtom1)
+          iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
+          iAtom2f = img2CentCell(iAtom2)
+          iStart2 = iSquare(iAtom2f)
+          iEnd2 = iSquare(iAtom2f+1)-1
+          do iKS = 1, this%parallelKS%nLocalKS
+            ! filling one side of the block, using Ssqr0 (from the GS), valid only for electron dynamics
+            ! Replacing i/c by i since using SI units
+            this%Ssqr(iStart1:iEnd1,iStart2:iEnd2,iKS) = this%Ssqr0(iStart1:iEnd1,iStart2:iEnd2,iKS) &
+              & * exp(-imag *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iAtom2f))))
+            ! filling transpose block, using Ssqr0 (from the GS), valid only for electron dynamics
+            this%Ssqr(iStart2:iEnd2,iStart1:iEnd1,iKS) = this%Ssqr0(iStart2:iEnd2,iStart1:iEnd1,iKS) &
+              & * exp(-imag *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom2f)-coord(:,iAtom1))))
+          end do
+        end do
+      end do
+      !invert overlap
+      do iKS = 1, this%parallelKS%nLocalKS
+        this%Sinv(:,:,iKS) = cmplx(0,0,dp)
+        T4 = this%Ssqr(:,:,iKS)
+        do iOrb = 1, this%nOrbs
+          this%Sinv(iOrb, iOrb, iKS) = 1.0_dp
+        end do
+        !passing T4 instead of Ssqr
+        call gesv(T4(:,:), this%Sinv(:,:,iKS))
+      end do
+      deallocate(T4)
+    end if
+
+  end subroutine updateS
 
   !> Kick the density matrix for spectrum calculations
   subroutine kickDM(this, rho, Ssqr, Sinv, iSquare, coord)
@@ -1453,9 +1518,8 @@ contains
       end if
 
       if (this%tUseVectorPotential) then
-        !TODO: correct envelope function by proper integral
-        this%tdVecPot(:, iStep) = E0/angFreq * envelope * &
-          & real(exp(imag*(time*angFreq + this%phase)) * this%fieldDir)
+        this%tdVecPot(:, iStep) = E0/angFreq * envelope * aimag(exp(imag*(time*angFreq + this%phase))&
+          & * this%fieldDir)
       end if
     end do
 
@@ -1964,6 +2028,9 @@ contains
         end if
       end do
       write(stdOut,"(A)")'S inverted'
+
+      allocate(this%Ssqr0(this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
+      this%Ssqr0 = Ssqr        !
 
       do iKS = 1, this%parallelKS%nLocalKS
         iK = this%parallelKS%localKS(1, iKS)
@@ -4092,38 +4159,8 @@ contains
     print *, 'H1 after updateH'
     print *, this%H1
 
-    ! in case of vector potential apply Peierls phase to the overlap after first updateH
-    if (this%tUseVectorPotential .and. this%tKick) then
-      allocate(T4(this%nOrbs,this%nOrbs))
-      do iAtom1 = 1, this%nAtom
-        iStart1 = iSquare(iAtom1)
-        iEnd1 = iSquare(iAtom1+1)-1
-        do iNeigh = 1, nNeighbourSK(iAtom1)
-          iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
-          iAtom2f = img2CentCell(iAtom2)
-          iStart2 = iSquare(iAtom2f)
-          iEnd2 = iSquare(iAtom2f+1)-1
-          do iKS = 1, this%parallelKS%nLocalKS
-            ! filling one side of the block
-            this%Ssqr(iStart1:iEnd1,iStart2:iEnd2,iKS) = this%Ssqr(iStart1:iEnd1,iStart2:iEnd2,iKS) &
-              & * exp(-imag/c *dot_product(this%tdVecPot(:,0),(coord(:,iAtom1)-coord(:,iAtom2f))))
-            ! filling transpose block
-            this%Ssqr(iStart2:iEnd2,iStart1:iEnd1,iKS) = this%Ssqr(iStart2:iEnd2,iStart1:iEnd1,iKS) &
-              & * exp(-imag/c *dot_product(this%tdVecPot(:,0),(coord(:,iAtom2f)-coord(:,iAtom1))))
-          end do
-        end do
-      end do
-      !invert overlap
-      do iKS = 1, this%parallelKS%nLocalKS
-        this%Sinv(:,:,iKS) = cmplx(0,0,dp)
-        T4 = this%Ssqr(:,:,iKS)
-        do iOrb = 1, this%nOrbs
-          this%Sinv(iOrb, iOrb, iKS) = 1.0_dp
-        end do
-        call gesv(T4(:,:), this%Sinv(:,:,iKS))
-      end do
-      deallocate(T4)
-    end if
+    !Call updateS to apply Peierls phase to the overlap at t=0
+    !call updateS(this, neighbourList, nNeighbourSK, img2CentCell, coord, iSquare, 0) ! iStep=0
 
     if (this%tForces) then
       this%totalForce(:,:) = 0.0_dp
@@ -4199,6 +4236,7 @@ contains
     print *, 'RHO after kick'
     print *, this%rho
 
+    ! Updating all the variables for the first step of dynamics (Euler)
     if (this%tIons) then
       coord(:,:) = this%coordNew
       call updateH0S(this, boundaryCond, this%Ssqr, this%Sinv, coord, orb, neighbourList,&
@@ -4222,6 +4260,11 @@ contains
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
         & this%dispersion, this%rho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
+
+    ! Call updateS to apply Peierls phase to the overlap at t=delta_t
+    !if (this%tLaser) then
+    !  call updateS(this, neighbourList, nNeighbourSK, img2CentCell, coord, iSquare, 0) ! iStep=0
+    !end if
 
     if (this%tForces) then
       call getForces(this, this%movedAccel, this%totalForce, this%rho, this%H1, this%Sinv,&
@@ -4496,13 +4539,17 @@ contains
           & this%speciesAll(:this%nAtom), .true.)
     end if
 
-    ! TODO charly add vec pot
     call updateH(this, this%H1, ints, this%ham0, this%speciesAll, this%qq, q0, coord, orb,&
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, iStep,&
         & this%chargePerShell, spinW, env, tDualSpinOrbit, xi, thirdOrd, this%qBlock, dftbU,&
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
         & this%dispersion, this%rho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
+
+    ! When using vector potential and laser, overlap matrix should be updated with Peierl phase
+    !if (this%tLaser) then
+    !  call updateS(this, neighbourList, nNeighbourSK, img2CentCell, coord, iSquare, iStep)
+    !end if
 
     if (this%tForces) then
       call getForces(this, this%movedAccel, this%totalForce, this%rho, this%H1, this%Sinv,&
