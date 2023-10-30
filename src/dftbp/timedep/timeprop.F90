@@ -1526,13 +1526,20 @@ contains
 
         call mpifx_allreduceip(env%mpi%globalComm, this%rhoPrim, MPI_SUM)
 
-      do iSpin = 1, this%nSpin
-    
-       call mulliken(env, qq(:,:,iSpin), ints%overlap, this%rhoPrim(:,iSpin), orb, iNeighbour,&
-        & nNeighbourSK, img2CentCell, iSparseStart)
+      !do iSpin = 1, this%nSpin
+      ! call mulliken(env, qq(:,:,iSpin), ints%overlap, this%rhoPrim(:,iSpin), orb, iNeighbour,&
+      !  & nNeighbourSK, img2CentCell, iSparseStart)
+      !enddo
 
- 
-      enddo
+        do iSpin = 1, this%nSpin
+          do iAt = 1, this%nAtom
+            iOrb1 = iSquare(iAt)
+            iOrb2 = iSquare(iAt+1)-1
+            ! hermitian transpose used as real part only is needed
+            qq(:iOrb2-iOrb1+1,iAt,iSpin) = real(sum(&
+                & rho(:,iOrb1:iOrb2,iSpin)*Ssqr(:,iOrb1:iOrb2,iSpin), dim=1), dp)
+          end do
+        end do      
 
       #:else
   
@@ -1982,13 +1989,12 @@ contains
           call psymmatinv(this%denseDesc%blacsOrbSqr, T2, errStatus)  
           Sinv(:,:,iKS) = cmplx(T2, 0, dp)
 
-!          write(*, *) "from psymmatinv"
-!            do i =1,2 
-!              do j=1,2
-!              write(*, *) i,j,Sinv(i,j,:)
-!              write(*, *) i,j,Ssqr(i,j, :)
-!              enddo
-!            enddo
+          write(*, *) "WARNING -- Sinv symm a mano"
+            do i =1,2 
+              do j=i,2
+                Sinv(i,j,iks) = Sinv(j,i,iks) 
+              enddo
+            enddo
 
         else
           !call error("MPI for Electron dynamics only for finit systems") 
@@ -2363,19 +2369,19 @@ endif
         & T3R, this%denseDesc%blacsOrbSqr, side="L")    
 
 ! ===============
-      !   write(*, *) "Real(Rho * H1 ) pblasfx_psymm"
-      !   do i =1,2 
-      !     do j=1,2
-      !      ! write(*, *) i,j,T3R(i,j)
-      !     enddo
-      !   enddo
+        write(*, *) "(H1) pblasfx_psymm"
+        do i =1,2 
+          do j=1,2
+            write(*, *) i,j,H1(i,j)
+          enddo
+        enddo
   
       ! call gemm(T4R,T1R,T2R)
   
       ! write(*, *) "Real(Rho * H1 ) gemm"
       !   do i =1,2 
       !     do j=1,2
-      !       !write(*, *) i,j,T4R(i,j)
+      !       write(*, *) i,j,T4R(i,j)
       !     enddo
       !   enddo
 ! =================
@@ -2383,20 +2389,20 @@ endif
     T2R(:,:) = T3R  
     T1R(:,:) = real(Sinv)
 
+
     ! Call ORIGINAL 
-!     call pblasfx_psymm(T1R, this%denseDesc%blacsOrbSqr, T2R, this%denseDesc%blacsOrbSqr,&
-!        & T3R, this%denseDesc%blacsOrbSqr, side="R")    
+    ! call pblasfx_psymm(T1R, this%denseDesc%blacsOrbSqr, T2R, this%denseDesc%blacsOrbSqr,&
+    !    & T3R, this%denseDesc%blacsOrbSqr, side="R")    
 
     ! Call ALTERNATIVO
     call pblasfx_psymm(T2R, this%denseDesc%blacsOrbSqr, T1R, this%denseDesc%blacsOrbSqr,&
-        & T3R, this%denseDesc%blacsOrbSqr, side="L")    
+        & T3R, this%denseDesc%blacsOrbSqr)    
 
 
     ! T3R real(rho)HSinv
 
 ! =================        
-  ! T4R = 0.0_dp
-
+ 
         write(*, *) "Real(Rho * H1 * Sinv) pblasfx_psymm"
         do i =1,2 
           do j=1,2
@@ -2404,14 +2410,14 @@ endif
           enddo
         enddo
   
-      ! call gemm(T4R,T2R,T1R)
+      !  call gemm(T5R,T2R,T1R)
   
-      ! write(*, *) "Real(Rho * H1 * Sinv) gemm"
-      !   do i =1,2 
-      !     do j=1,2
-      !       write(*, *) i,j,T4R(i,j)
-      !     enddo
-      !   enddo
+      !  write(*, *) "Real(Rho * H1 * Sinv) gemm"
+      !    do i =1,2 
+      !      do j=1,2
+      !        write(*, *) i,j,T5R(i,j)
+      !      enddo
+      !    enddo
 ! =================  
   
     T1R(:,:) = aimag(rho)
@@ -2422,14 +2428,21 @@ endif
     
     T2R(:,:) = T4R  
     T1R(:,:) = real(Sinv)
+    
+    write(*, *) "Imag(Rho * H1 ) pblasfx_psymm"
+    do i =1,2 
+      do j=1,2
+        write(*, *) i,j,T4R(i,j)
+      enddo
+    enddo
 
     ! call original: 
- !   call pblasfx_psymm(T1R, this%denseDesc%blacsOrbSqr, T2R, this%denseDesc%blacsOrbSqr,&
- !       & T4R, this%denseDesc%blacsOrbSqr, side="R")    
+!    call pblasfx_psymm(T1R, this%denseDesc%blacsOrbSqr, T2R, this%denseDesc%blacsOrbSqr,&
+!        & T4R, this%denseDesc%blacsOrbSqr, side="R")    
  
       !Call alternativo
     call pblasfx_psymm(T2R, this%denseDesc%blacsOrbSqr, T1R, this%denseDesc%blacsOrbSqr,&
-        & T4R, this%denseDesc%blacsOrbSqr, side="L")    
+        & T4R, this%denseDesc%blacsOrbSqr)    
 
 ! =================        
         write(*, *) "Imag(Rho * H1 * Sinv) pblasfx_psymm"
@@ -2439,23 +2452,23 @@ endif
           enddo
         enddo
   
-      call gemm(T5R,T2R,T1R)
+      ! call gemm(T5R,T2R,T1R)
   
-      ! write(*, *) "Imag(Rho * H1 * Sinv) gemm"
-      !   do i =1,2 
-      !     do j=1,2
-      !       write(*, *) i,j,T5R(i,j)
-      !     enddo
-      !   enddo
+      !  write(*, *) "Imag(Rho * H1 * Sinv) gemm"
+      !    do i =1,2 
+      !      do j=1,2
+      !        write(*, *) i,j,T5R(i,j)
+      !      enddo
+      !    enddo
 ! =================  
   
 
    ! T4R= imag(rho)HSinv
 
-    call pblasfx_ptran(T3R, this%denseDesc%blacsOrbSqr, T1R, this%denseDesc%blacsOrbSqr)
-
-    call pblasfx_ptran(T4R, this%denseDesc%blacsOrbSqr, T2R, this%denseDesc%blacsOrbSqr)
-
+    !call pblasfx_ptran(T3R, this%denseDesc%blacsOrbSqr, T1R, this%denseDesc%blacsOrbSqr)
+        T1R = transpose(T3R)
+    !call pblasfx_ptran(T4R, this%denseDesc%blacsOrbSqr, T2R, this%denseDesc%blacsOrbSqr)
+        T2R = transpose(T4R)
 ! =================  
       !   write(*, *) "Real(Rho * H1 * Sinv)TRANS "
       !   do i =1,2 
@@ -2475,25 +2488,27 @@ endif
 
 ! =================
 ! (rhoOld)
-    ! write(*, *) "(Rho_old)"
-    ! do i =1,2 
-    !   do j=1,2
-    !     write(*, *) i,j,rhoOld(i,j)
-    !   enddo
-    ! enddo
+    write(*, *) "(Rho_old)"
+    do i =1,2 
+      do j=1,2
+        write(*, *) i,j,rhoOld(i,j)
+      enddo
+    enddo
 ! =================
 
     ! build the commutator combining the real and imaginary parts of the previous result
 
+    ! NEWWWW :
     !$OMP WORKSHARE
-    rhoOld(:,:) = rhoOld + cmplx(0, -step, dp) * (T3R + imag * T4R)&
-        & + cmplx(0, step, dp) * (T1R - imag * T2R)
+    rhoOld(:,:) = rhoOld + cmplx(0, step, dp) * (T3R + imag * T4R)&
+        & + cmplx(0, -step, dp) * (T1R - imag * T2R)
     !$OMP END WORKSHARE
 
     ! !$OMP WORKSHARE
-    ! rhoOld(:,:) = rhoOld + cmplx(0, -step, dp) * (T3R - imag * T4R)&
-    !     & - cmplx(0, step, dp) * (T1R - imag * T2R)
+    !     rhoOld(:,:) = rhoOld + cmplx(0, -step, dp) * (T3R + imag * T4R)&
+    !     & + cmplx(0, step, dp) * (T1R - imag * T2R)
     ! !$OMP END WORKSHARE
+
 
          
     deallocate(T1R)
@@ -2543,6 +2558,13 @@ endif
     T1R(:,:) = real(H1)
     T2R(:,:) = real(Sinv)
 
+    write(*, *) "H1"
+    do i =1,2 
+      do j=1,2
+        write(*, *) i,j,H1(i,j)
+      enddo
+    enddo
+
     call gemm(T3R,T2R,T1R)
     T2R(:,:) = T3R
 
@@ -2554,10 +2576,13 @@ endif
     call gemm(T4R,T2R,T1R)
 
    ! =================  
+    T6R = transpose(T3R)
+    T5R = transpose(T4R)
+
+
     write(*, *) "TRANS Real(Sinv * H1 * Rho) "
     do i =1,2 
       do j=1,2
-        T6R = transpose(T3R)
 
         write(*, *) i,j,T6R(i,j)
       enddo
@@ -2566,18 +2591,17 @@ endif
   write(*, *) "TRANS iamg(Sinv * H1 * Rho) "
     do i =1,2 
       do j=1,2
-        T5R = transpose(T4R)
       write(*, *) i,j,T5R(i,j)
       enddo
     enddo
 !    =================  
 
-    ! write(*, *) "(Rho_old)"
-    ! do i =1,2 
-    !   do j=1,2
-    !     write(*, *) i,j,rhoOld(i,j)
-    !   enddo
-    ! enddo
+     write(*, *) "(Rho_old)"
+     do i =1,2 
+       do j=1,2
+         write(*, *) i,j,rhoOld(i,j)
+       enddo
+     enddo
 
     ! build the commutator combining the real and imaginary parts of the previous result
     !$OMP WORKSHARE
