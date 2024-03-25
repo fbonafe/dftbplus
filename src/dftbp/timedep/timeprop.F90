@@ -1007,10 +1007,10 @@ contains
        & iAtInCentralRegion, tFixEf, Ef, electronicSolver, qDepExtPot, errStatus)
       @:PROPAGATE_ERROR(errStatus)
 
-      print *, 'RHO OLD'
-      print *, this%rhoOld
-      print *, 'RHO NEW'
-      print *, this%rho
+!      print *, 'RHO OLD'
+!      print *, this%rhoOld
+!      print *, 'RHO NEW'
+!      print *, this%rho
 
       if (mod(iStep, max(this%nSteps / 10, 1)) == 0) then
         call loopTime%stop()
@@ -1214,8 +1214,8 @@ contains
     ! Check if we need to apply Peierls phase to opverlap matrix
     if (this%tUseVectorPotential) then      ! apply Peierls phase 
       this%hamCmplx(:,:) = ints%hamiltonian ! real to complex
-      print *, 'DEBUGGING tdVecPot'
-      print *, this%tdVecPot(:,iStep)
+!      print *, 'DEBUGGING tdVecPot'
+!      print *, this%tdVecPot(:,iStep)
       do iAtom1 = 1, this%nAtom
         ii = iSquare(iAtom1)
         nOrb1 = iSquare(iAtom1 + 1) - ii
@@ -4094,8 +4094,8 @@ contains
       allocate(this%tdVecPot(3, 0:this%nSteps))
 !      this%tdVecPot = 0.0_dp                       !so H1 = H_gs
        this%tdVecPot(this%currPolDir,:) = -c * this%field
-       print *, 'DEBUGGING tdVecPot'
-       print *, this%tdVecPot(this%currPolDir,0)
+!       print *, 'DEBUGGING tdVecPot'
+!       print *, this%tdVecPot(this%currPolDir,0)
     end if
 
     call initializeTDVariables(this, this%trho, this%H1, this%Ssqr, this%Sinv, H0, this%ham0, &
@@ -4146,8 +4146,8 @@ contains
           & this%speciesAll(:this%nAtom), .true.)
     end if
     
-    print *, 'H1 previous updateH'
-    print *, this%H1
+!    print *, 'H1 previous updateH'
+!    print *, this%H1
 
     call updateH(this, this%H1, ints, this%ham0, this%speciesAll, this%qq, q0, coord, orb,&
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, 0,&
@@ -4156,8 +4156,8 @@ contains
         & this%dispersion, this%trho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
-    print *, 'H1 after updateH'
-    print *, this%H1
+!    print *, 'H1 after updateH'
+!    print *, this%H1
 
     !Call updateS to apply Peierls phase to the overlap at t=0
     !call updateS(this, neighbourList, nNeighbourSK, img2CentCell, coord, iSquare, 0) ! iStep=0
@@ -4231,10 +4231,10 @@ contains
     this%rho => this%trho
     this%rhoOld => this%trhoOld
 
-    print *, 'RHO before kick'
-    print *, this%rhoOld
-    print *, 'RHO after kick'
-    print *, this%rho
+!    print *, 'RHO before kick'
+!    print *, this%rhoOld
+!    print *, 'RHO after kick'
+!    print *, this%rho
 
     ! Updating all the variables for the first step of dynamics (Euler)
     if (this%tIons) then
