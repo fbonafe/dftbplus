@@ -42,7 +42,7 @@ module dftbp_dftb_sparse2dense
   interface unpackHS
     module procedure unpackHS_real
     module procedure unpackHS_cmplx_kpts
-    module procedure unpackHS_cmplx2cmplx_kpts
+    module procedure unpackHS_cmplx_kpts_peierls
   end interface unpackHS
 
 
@@ -118,14 +118,14 @@ contains
   !> to the sparse matrix (e.g. Peierls phase). Note the non on-site blocks are only
   !> filled in the lower triangle part of the matrix. To fill the matrix completely, apply the
   !> blockSymmetrizeHS subroutine.
-  subroutine unpackHS_cmplx2cmplx_kpts(square, orig, kPoint, iNeighbour, nNeighbourSK, iCellVec, cellVec,&
+  subroutine unpackHS_cmplx_kpts_peierls(square, orig, kPoint, tdVecPot, coordAll, iNeighbour, nNeighbourSK, iCellVec, cellVec,&
       & iAtomStart, iSparseStart, img2CentCell)
 
     !> Square form matrix on exit.
     complex(dp), intent(out) :: square(:, :)
 
     !> Sparse matrix
-    complex(dp), intent(in) :: orig(:)
+    real(dp), intent(in) :: orig(:)
 
     !> Relative coordinates of the K-point where the sparse matrix should be unfolded.
     real(dp), intent(in) :: kPoint(:)
@@ -151,7 +151,13 @@ contains
     !> Map from images of atoms to central cell atoms
     integer, intent(in) :: img2CentCell(:)
 
-    complex(dp) :: phase
+    !> Coords of the atoms (3, nAllAtom)
+    real(dp), intent(in) :: coordAll(:,:)
+
+    !> Vector potential at current time
+    real(dp), intent(in) :: tdVecPot(3)
+
+    complex(dp) :: phase, phase2
     integer :: nAtom
     integer :: iOrig, ii, jj
     integer :: iNeigh
@@ -188,12 +194,13 @@ contains
           phase = exp((0.0_dp, 1.0_dp) * dot_product(kPoint2p, cellVec(:, iVec)))
           iOldVec = iVec
         end if
+        phase2 = exp(-imag * dot_product(tdVecPot, (coordAll(:,iAtom2) - coordAll(:,iAtom1))))
         square(jj:jj+nOrb2-1, ii:ii+nOrb1-1) = square(jj:jj+nOrb2-1, ii:ii+nOrb1-1)&
-            & + phase * reshape(orig(iOrig:iOrig+nOrb1*nOrb2-1), [nOrb2, nOrb1])
+            & + phase * phase2 * reshape(orig(iOrig:iOrig+nOrb1*nOrb2-1), [nOrb2, nOrb1])
       end do
     end do
 
-  end subroutine unpackHS_cmplx2cmplx_kpts
+  end subroutine unpackHS_cmplx_kpts_peierls
 
 
   !> Unpacks sparse matrix to square form (complex version) Note the non on-site blocks are only

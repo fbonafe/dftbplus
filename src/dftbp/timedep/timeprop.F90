@@ -1212,38 +1212,38 @@ contains
     end if
 
     ! Check if we need to apply Peierls phase to opverlap matrix
-    if (this%tUseVectorPotential) then      ! apply Peierls phase 
-      this%hamCmplx(:,:) = ints%hamiltonian ! real to complex
-!      print *, 'DEBUGGING tdVecPot'
-!      print *, this%tdVecPot(:,iStep)
-      do iAtom1 = 1, this%nAtom
-        ii = iSquare(iAtom1)
-        nOrb1 = iSquare(iAtom1 + 1) - ii
-        do iNeigh = 1, nNeighbourSK(iAtom1)
-          iOrig = iSparseStart(iNeigh, iAtom1) + 1
-          iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
-          iAtom2f = img2CentCell(iAtom2)
-          jj = iSquare(iAtom2f)
-          @:ASSERT(jj >= ii)
-          nOrb2 = iSquare(iAtom2f + 1) - jj
-          do iSpin = 1, this%nSpin
-            ! Replacing i/c by i since using SI units
-            this%hamCmplx(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) = this%hamCmplx(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) &
-                 & * exp(-imag * dot_product(this%tdVecPot(:,iStep), (coordAll(:,iAtom2) - coordAll(:,iAtom1))))
-          end do
-        ! the order of the coords is bc this sparse array fills the square(jj:jj+nOrb2-1, ii:ii+nOrb1-1)
-        ! before this was:
-        ! H1(iStart1:iEnd1,iStart2:iEnd2,iKS) = H1(iStart1:iEnd1,iStart2:iEnd2,iKS) &
-        !   & * exp(-imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iAtom2f))))
+!     if (this%tUseVectorPotential) then      ! apply Peierls phase 
+!       this%hamCmplx(:,:) = ints%hamiltonian ! real to complex
+! !      print *, 'DEBUGGING tdVecPot'
+! !      print *, this%tdVecPot(:,iStep)
+!       do iAtom1 = 1, this%nAtom
+!         ii = iSquare(iAtom1)
+!         nOrb1 = iSquare(iAtom1 + 1) - ii
+!         do iNeigh = 1, nNeighbourSK(iAtom1)
+!           iOrig = iSparseStart(iNeigh, iAtom1) + 1
+!           iAtom2 = neighbourList%iNeighbour(iNeigh, iAtom1)
+!           iAtom2f = img2CentCell(iAtom2)
+!           jj = iSquare(iAtom2f)
+!           @:ASSERT(jj >= ii)
+!           nOrb2 = iSquare(iAtom2f + 1) - jj
+!           do iSpin = 1, this%nSpin
+!             ! Replacing i/c by i since using SI units
+!             this%hamCmplx(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) = this%hamCmplx(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) &
+!                  & * exp(-imag * dot_product(this%tdVecPot(:,iStep), (coordAll(:,iAtom2) - coordAll(:,iAtom1))))
+!           end do
+!         ! the order of the coords is bc this sparse array fills the square(jj:jj+nOrb2-1, ii:ii+nOrb1-1)
+!         ! before this was:
+!         ! H1(iStart1:iEnd1,iStart2:iEnd2,iKS) = H1(iStart1:iEnd1,iStart2:iEnd2,iKS) &
+!         !   & * exp(-imag/c *dot_product(this%tdVecPot(:,iStep),(coord(:,iAtom1)-coord(:,iAtom2f))))
   
-        !print *,'iAt1',iAtom1,'coordAll(:,iAtom1)',coordAll(:,iAtom1)
-        !print *,'iAt2',iAtom2,'coordAll(:,iAtom2)',coordAll(:,iAtom2)
-        !print *,'iAt2f',iAtom2f,'coordAll(:,iAtom2f)',coordAll(:,iAtom2f)
-        !print *,'size coord',size(coord)
-        !print *,'size coordAll',size(coordAll)
-        end do
-      end do
-    end if
+!         !print *,'iAt1',iAtom1,'coordAll(:,iAtom1)',coordAll(:,iAtom1)
+!         !print *,'iAt2',iAtom2,'coordAll(:,iAtom2)',coordAll(:,iAtom2)
+!         !print *,'iAt2f',iAtom2f,'coordAll(:,iAtom2f)',coordAll(:,iAtom2f)
+!         !print *,'size coord',size(coord)
+!         !print *,'size coordAll',size(coordAll)
+!         end do
+!       end do
+!     end if
 
     ! in case of vector potential
 !    if (this%tUseVectorPotential) then
@@ -1271,9 +1271,12 @@ contains
       iK = this%parallelKS%localKS(1, iKS)
       iSpin = this%parallelKS%localKS(2, iKS)
       if (this%tUseVectorPotential) then
-        call unpackHS(H1(:,:,iKS), this%hamCmplx(:,iSpin), this%kPoint(:,iK),&
-            & neighbourList%iNeighbour, nNeighbourSK, this%iCellVec, this%cellVec, iSquare,&
-            & iSparseStart, img2CentCell)
+#        call unpackHS(H1(:,:,iKS), this%hamCmplx(:,iSpin), this%kPoint(:,iK),&
+#            & neighbourList%iNeighbour, nNeighbourSK, this%iCellVec, this%cellVec, iSquare,&
+#            & iSparseStart, img2CentCell)
+        call unpackHS(H1(:,:,iKS), ints%hamiltonian(:,iSpin), this%kPoint(:,iK),&
+            & this%tdVecPot(:,iStep), coordAll, neighbourList%iNeighbour, nNeighbourSK, &
+            & this%iCellVec, this%cellVec, iSquare, iSparseStart, img2CentCell)
         call blockHermitianHS(H1(:,:,iKS), iSquare)
       else
         if (this%tRealHS) then
