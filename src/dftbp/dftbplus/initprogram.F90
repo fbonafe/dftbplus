@@ -3712,7 +3712,7 @@ contains
           & this%nAtom, this%cutOff%skCutoff, this%cutOff%mCutoff, this%atomEigVal,&
           & this%dispersion, this%nonSccDeriv, this%tPeriodic, this%parallelKS, this%tRealHS,&
           & this%kPoint, this%kWeight, this%isRangeSep, this%scc, this%tblite, this%eFieldScaling,&
-          & this%hamiltonianType, errStatus)
+          & this%hamiltonianType, errStatus, input%ctrl%tSCC)
       if (errStatus%hasError()) then
         call error(errStatus%message)
       end if

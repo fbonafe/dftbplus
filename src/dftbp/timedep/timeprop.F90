@@ -290,7 +290,7 @@ module dftbp_timedep_timeprop
     type(TFileDescr) :: dipoleDat, qDat, energyDat, atomEnergyDat
     type(TFileDescr) :: forceDat, coorDat, fdBondPopul, fdBondEnergy, currentDat
     type(TPotentials) :: potential
-    logical :: tUseVectorPotential
+    logical :: tUseVectorPotential, tSCC = .true.
 
     !> count of the number of times dynamics has been initialised
     integer :: nDynamicsInit = 0
@@ -375,7 +375,7 @@ contains
   subroutine TElecDynamics_init(this, inp, species, speciesName, tWriteAutotest, autotestTag,&
       & randomThermostat, mass, nAtom, skCutoff, mCutoff, atomEigVal, dispersion, nonSccDeriv,&
       & tPeriodic, parallelKS, tRealHS, kPoint, kWeight, isRangeSep, sccCalc, tblite,&
-      & eFieldScaling, hamiltonianType, errStatus)
+      & eFieldScaling, hamiltonianType, errStatus, tSCC_bool)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(out) :: this
@@ -458,6 +458,9 @@ contains
     !> Error status
     type(TStatus), intent(out) :: errStatus
 
+    !> Is calculation SCC?
+    logical, intent(in) :: tSCC_bool
+
     real(dp) :: norm, tempAtom
     logical :: tMDstill
     integer :: iAtom
@@ -485,6 +488,7 @@ contains
     this%KWeight = KWeight
     this%hamiltonianType = hamiltonianType
     this%tUseVectorPotential = inp%tUseVectorPotential
+    this%tSCC = tSCC_bool
     allocate(this%parallelKS, source=parallelKS)
     allocate(this%populDat(this%parallelKS%nLocalKS))
     if (.not.any([allocated(sccCalc), allocated(tblite)])) then
@@ -567,6 +571,9 @@ contains
       if (.not. this%tRealHS) then
         @:RAISE_ERROR(errStatus, -1, "Ion dynamics is not implemented yet for imaginary&
             & Hamiltonians.")
+      end if
+      if (.not. this%tSCC) then
+        call error("Ion dynamics and forces are not implemented yet for non-SCC calculations.")
       end if
       this%tForces = .true.
       this%indMovedAtom = inp%indMovedAtom
@@ -1168,9 +1175,11 @@ contains
     call resetInternalPotentials(tDualSpinOrbit, xi, orb, speciesAll, potential)
 
     call getChargePerShell(qq, orb, speciesAll, chargePerShell)
-    call addChargePotentials(env, this%sccCalc, this%tblite, .true., qq, q0, chargePerShell,&
+    if (this%tSCC) then
+      call addChargePotentials(env, this%sccCalc, this%tblite, .true., qq, q0, chargePerShell,&
         & orb, this%multipole, speciesAll, neighbourList, img2CentCell, spinW, solvation,&
         & thirdOrd, dispersion, potential)
+    end if
 
     if (allocated(dftbU) .or. allocated(onSiteElements)) then
       ! convert to qm representation
@@ -1271,9 +1280,9 @@ contains
       iK = this%parallelKS%localKS(1, iKS)
       iSpin = this%parallelKS%localKS(2, iKS)
       if (this%tUseVectorPotential) then
-#        call unpackHS(H1(:,:,iKS), this%hamCmplx(:,iSpin), this%kPoint(:,iK),&
-#            & neighbourList%iNeighbour, nNeighbourSK, this%iCellVec, this%cellVec, iSquare,&
-#            & iSparseStart, img2CentCell)
+!        call unpackHS(H1(:,:,iKS), this%hamCmplx(:,iSpin), this%kPoint(:,iK),&
+!            & neighbourList%iNeighbour, nNeighbourSK, this%iCellVec, this%cellVec, iSquare,&
+!            & iSparseStart, img2CentCell)
         call unpackHS(H1(:,:,iKS), ints%hamiltonian(:,iSpin), this%kPoint(:,iK),&
             & this%tdVecPot(:,iStep), coordAll, neighbourList%iNeighbour, nNeighbourSK, &
             & this%iCellVec, this%cellVec, iSquare, iSparseStart, img2CentCell)
@@ -1479,6 +1488,8 @@ contains
     midPulse = (this%time0 + this%time1)/2.0_dp
     deltaT = this%time1 - this%time0
     angFreq = this%omega
+    print *, "angular frequency"
+    print *, angFreq
     E0 = this%field
     if (this%tKickAndLaser) then
       E0 = this%laserField
@@ -4149,8 +4160,8 @@ contains
           & this%speciesAll(:this%nAtom), .true.)
     end if
     
-!    print *, 'H1 previous updateH'
-!    print *, this%H1
+    print *, 'H1 previous updateH'
+    print *, this%H1(1,2,1), this%H1(2,1,1)
 
     call updateH(this, this%H1, ints, this%ham0, this%speciesAll, this%qq, q0, coord, orb,&
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, 0,&
@@ -4159,8 +4170,8 @@ contains
         & this%dispersion, this%trho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
-!    print *, 'H1 after updateH'
-!    print *, this%H1
+    print *, 'H1 after first updateH'
+    print *, this%H1(1,2,1), this%H1(2,1,1)
 
     !Call updateS to apply Peierls phase to the overlap at t=0
     !call updateS(this, neighbourList, nNeighbourSK, img2CentCell, coord, iSquare, 0) ! iStep=0
@@ -4263,6 +4274,9 @@ contains
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
         & this%dispersion, this%rho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
+
+    print *, 'H1 after second updateH'
+    print *, this%H1(1,2,1), this%H1(2,1,1)
 
     ! Call updateS to apply Peierls phase to the overlap at t=delta_t
     !if (this%tLaser) then
@@ -4548,6 +4562,9 @@ contains
         & onSiteElements, refExtPot, this%deltaRho, this%H1LC, this%Ssqr, solvation, rangeSep,&
         & this%dispersion, this%rho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
+
+    print *, 'H1 updateH: ', this%time
+    print *, this%H1(1,2,1), this%H1(2,1,1)
 
     ! When using vector potential and laser, overlap matrix should be updated with Peierl phase
     !if (this%tLaser) then
