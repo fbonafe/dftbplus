@@ -80,6 +80,8 @@ module dftbp_timedep_timeprop
   public :: TElecDynamicsInp, TElecDynamics
   public :: pertTypes, envTypes, tdSpinTypes
 
+!  Integer :: KpointHam = 10
+
   !> Data type to  initialize electronic dynamics variables from parser
   type TElecDynamicsInp
 
@@ -290,7 +292,7 @@ module dftbp_timedep_timeprop
     type(TFileDescr) :: dipoleDat, qDat, energyDat, atomEnergyDat
     type(TFileDescr) :: forceDat, coorDat, fdBondPopul, fdBondEnergy, currentDat
     type(TPotentials) :: potential
-    logical :: tUseVectorPotential, tSCC = .true.
+    logical :: tUseVectorPotential, doSCC = .true.
 
     !> count of the number of times dynamics has been initialised
     integer :: nDynamicsInit = 0
@@ -488,12 +490,12 @@ contains
     this%KWeight = KWeight
     this%hamiltonianType = hamiltonianType
     this%tUseVectorPotential = inp%tUseVectorPotential
-    this%tSCC = tSCC_bool
+    this%doSCC = tSCC_bool
     allocate(this%parallelKS, source=parallelKS)
     allocate(this%populDat(this%parallelKS%nLocalKS))
-    if (.not.any([allocated(sccCalc), allocated(tblite)])) then
-      @:RAISE_ERROR(errStatus, -1, "SCC calculations are currently required for dynamics")
-    end if
+!    if (.not.any([allocated(sccCalc), allocated(tblite)])) then
+!      @:RAISE_ERROR(errStatus, -1, "SCC calculations are currently required for dynamics")
+!    end if
     if (allocated(sccCalc)) then
       this%sccCalc = sccCalc
     end if
@@ -572,8 +574,10 @@ contains
         @:RAISE_ERROR(errStatus, -1, "Ion dynamics is not implemented yet for imaginary&
             & Hamiltonians.")
       end if
-      if (.not. this%tSCC) then
-        call error("Ion dynamics and forces are not implemented yet for non-SCC calculations.")
+      if (.not. this%doSCC) then
+        @:RAISE_ERROR(errStatus, -1, "Ion dynamics is not implemented yet for non-SCC&
+            & calculations")
+!        call error("Ion dynamics and forces are not implemented yet for non-SCC calculations.")
       end if
       this%tForces = .true.
       this%indMovedAtom = inp%indMovedAtom
@@ -1027,6 +1031,9 @@ contains
       end if
 
     end do
+    
+    !close(91)
+    !close(92)
 
     write(stdOut, "(A)") 'Dynamics finished OK!'
     call env%globalTimer%stopTimer(globalTimers%elecDynLoop)
@@ -1175,7 +1182,7 @@ contains
     call resetInternalPotentials(tDualSpinOrbit, xi, orb, speciesAll, potential)
 
     call getChargePerShell(qq, orb, speciesAll, chargePerShell)
-    if (this%tSCC) then
+    if (this%doSCC) then
       call addChargePotentials(env, this%sccCalc, this%tblite, .true., qq, q0, chargePerShell,&
         & orb, this%multipole, speciesAll, neighbourList, img2CentCell, spinW, solvation,&
         & thirdOrd, dispersion, potential)
@@ -1283,6 +1290,8 @@ contains
 !        call unpackHS(H1(:,:,iKS), this%hamCmplx(:,iSpin), this%kPoint(:,iK),&
 !            & neighbourList%iNeighbour, nNeighbourSK, this%iCellVec, this%cellVec, iSquare,&
 !            & iSparseStart, img2CentCell)
+        !print *, "TIME: "
+        !print *, this%time
         call unpackHS(H1(:,:,iKS), ints%hamiltonian(:,iSpin), this%kPoint(:,iK),&
             & this%tdVecPot(:,iStep), coordAll, neighbourList%iNeighbour, nNeighbourSK, &
             & this%iCellVec, this%cellVec, iSquare, iSparseStart, img2CentCell)
@@ -1488,8 +1497,8 @@ contains
     midPulse = (this%time0 + this%time1)/2.0_dp
     deltaT = this%time1 - this%time0
     angFreq = this%omega
-    print *, "angular frequency"
-    print *, angFreq
+  !  print *, "angular frequency"
+  !  print *, angFreq
     E0 = this%field
     if (this%tKickAndLaser) then
       E0 = this%laserField
@@ -2043,8 +2052,8 @@ contains
       end do
       write(stdOut,"(A)")'S inverted'
 
-      allocate(this%Ssqr0(this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
-      this%Ssqr0 = Ssqr        !
+      !allocate(this%Ssqr0(this%nOrbs,this%nOrbs,this%parallelKS%nLocalKS))
+      !this%Ssqr0 = Ssqr        !
 
       do iKS = 1, this%parallelKS%nLocalKS
         iK = this%parallelKS%localKS(1, iKS)
@@ -3828,13 +3837,13 @@ contains
         ! I = -4*e/hbar (H_ab Im(\rho_ab) - S_ab*Im(E_ab))
         orbCurrentsPrim(1:nOrb1*nOrb2) = hh(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) * aimag(rhoPrim(iOrig:iOrig+nOrb1*nOrb2-1,iSpin)) &
              & - ss(iOrig:iOrig+nOrb1*nOrb2-1,iSpin) * aimag(ee(iOrig:iOrig+nOrb1*nOrb2-1,iSpin))
-        if (iAtom2f == iAtom2) then
-           print *,'orbCurrentsPrim(1:nOrb1*nOrb2)',orbCurrentsPrim(1:nOrb1*nOrb2)
-           print *,'hh',hh(iOrig:iOrig+nOrb1*nOrb2-1,iSpin)
-           print *,'hh',aimag(rhoPrim(iOrig:iOrig+nOrb1*nOrb2-1,iSpin))
-           print *,'ss',ss(iOrig:iOrig+nOrb1*nOrb2-1,iSpin)
-           print *,'ee',aimag(ee(iOrig:iOrig+nOrb1*nOrb2-1,iSpin))
-         end if
+        !if (iAtom2f == iAtom2) then
+        !   print *,'orbCurrentsPrim(1:nOrb1*nOrb2)',orbCurrentsPrim(1:nOrb1*nOrb2)
+        !   print *,'hh',hh(iOrig:iOrig+nOrb1*nOrb2-1,iSpin)
+        !   print *,'hh',aimag(rhoPrim(iOrig:iOrig+nOrb1*nOrb2-1,iSpin))
+        !   print *,'ss',ss(iOrig:iOrig+nOrb1*nOrb2-1,iSpin)
+        !   print *,'ee',aimag(ee(iOrig:iOrig+nOrb1*nOrb2-1,iSpin))
+        ! end if
         this%atomCurrents(iAtom1,iAtom2) = this%atomCurrents(iAtom1,iAtom2) - 4.0 * sum(orbCurrentsPrim(1:nOrb1*nOrb2))
       end do
     end do
@@ -4066,9 +4075,9 @@ contains
       allocate(this%orbCurrents(this%nOrbs, this%nOrbs))
       allocate(this%atomCurrents(this%nAtom, this%nAllAtom))
     end if
-    if (this%tUseVectorPotential) then
-      allocate(this%hamCmplx(size(ints%hamiltonian, dim=1), size(ints%hamiltonian, dim=2)))
-    end if
+    !if (this%tUseVectorPotential) then
+    !  allocate(this%hamCmplx(size(ints%hamiltonian, dim=1), size(ints%hamiltonian, dim=2)))
+    !end if
 
     allocate(this%occ(this%nOrbs))
     allocate(this%RdotSprime(this%nOrbs,this%nOrbs))
@@ -4105,11 +4114,13 @@ contains
     end if
     if (this%tKick .and. this%tUseVectorPotential) then
       ! initialize tdVecPot array, needed when calling updateH for the Peierls phase
-      allocate(this%tdVecPot(3, 0:this%nSteps))
+      if (this%iCall == 1) then
+        allocate(this%tdVecPot(3, 0:this%nSteps))
+      end if
 !      this%tdVecPot = 0.0_dp                       !so H1 = H_gs
-       this%tdVecPot(this%currPolDir,:) = -c * this%field
-!       print *, 'DEBUGGING tdVecPot'
-!       print *, this%tdVecPot(this%currPolDir,0)
+      this%tdVecPot(this%currPolDir,:) = -c * this%field
+       print *, 'DEBUGGING tdVecPot'
+       print *, this%tdVecPot(this%currPolDir,:)
     end if
 
     call initializeTDVariables(this, this%trho, this%H1, this%Ssqr, this%Sinv, H0, this%ham0, &
@@ -4160,8 +4171,20 @@ contains
           & this%speciesAll(:this%nAtom), .true.)
     end if
     
-    print *, 'H1 previous updateH'
-    print *, this%H1(1,2,1), this%H1(2,1,1)
+    !print *, 'H1 previous updateH'
+    !print *, this%H1(1,1,KpointHam), this%H1(1,2,KpointHam)
+    !print *, this%H1(2,1,KpointHam), this%H1(2,2,KpointHam)
+    !open (unit=91, file="RealHam_H2_per.dat") 
+    !write(91, *) "#RealH Time (fs),         H11,          H12,            H21,            H22"
+    !write(91, '(5F30.20)') this%time * au__fs, real(this%H1(1,1,KpointHam)), real(this%H1(1,2,KpointHam)), &
+    !      & real(this%H1(2,1,KpointHam)), real(this%H1(2,2,KpointHam))
+    !close(91)
+    !open (unit=92, file="ImHam_H2_per.dat")
+    !write(92, *) "#ImagH Time (fs),          H11,         H12,            H21,            H22"
+    !write(92, '(5F30.20)') this%time * au__fs, aimag(this%H1(1,1,KpointHam)), aimag(this%H1(1,2,KpointHam)), &
+    !      & aimag(this%H1(2,1,KpointHam)), aimag(this%H1(2,2,KpointHam))
+    !close(92)
+
 
     call updateH(this, this%H1, ints, this%ham0, this%speciesAll, this%qq, q0, coord, orb,&
         & this%potential, neighbourList, nNeighbourSK, iSquare, iSparseStart, img2CentCell, 0,&
@@ -4170,14 +4193,19 @@ contains
         & this%dispersion, this%trho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
-    print *, 'H1 after first updateH'
-    print *, this%H1(1,2,1), this%H1(2,1,1)
-
+    !print *, 'H1 after first updateH'
+    !print *, this%H1(1,1,KpointHam), this%H1(1,2,KpointHam)
+    !print *, this%H1(2,1,KpointHam), this%H1(2,2,KpointHam)
+    !write(91, '(5F30.20)') this%time * au__fs, real(this%H1(1,1,KpointHam)), real(this%H1(1,2,KpointHam)), &
+    !      & real(this%H1(2,1,KpointHam)), real(this%H1(2,2,KpointHam))
+    !write(92, '(5F30.20)') this%time * au__fs, aimag(this%H1(1,1,KpointHam)), aimag(this%H1(1,2,KpointHam)), &
+    !      & aimag(this%H1(2,1,KpointHam)), aimag(this%H1(2,2,KpointHam))
+    
     !Call updateS to apply Peierls phase to the overlap at t=0
     !call updateS(this, neighbourList, nNeighbourSK, img2CentCell, coord, iSquare, 0) ! iStep=0
 
     if (this%tForces) then
-      this%totalForce(:,:) = 0.0_dp
+      this%totalForce(:,:) = 0.0_dp 
       call getForces(this, this%movedAccel, this%totalForce, this%trho, this%H1, this%Sinv,&
           & neighbourList, nNeighbourSK, img2CentCell, iSparseStart, iSquare, this%potential, orb,&
           & skHamCont, skOverCont, this%qq, q0, repulsive, coordAll, this%rhoPrim, this%ErhoPrim,&
@@ -4275,9 +4303,13 @@ contains
         & this%dispersion, this%rho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
-    print *, 'H1 after second updateH'
-    print *, this%H1(1,2,1), this%H1(2,1,1)
-
+    !print *, 'H1 after second updateH'
+    !print *, this%H1(1,1,KpointHam), this%H1(1,2,KpointHam)
+    !print *, this%H1(2,1,KpointHam), this%H1(2,2,KpointHam)
+    !write(91, '(5F30.20)') this%time * au__fs, real(this%H1(1,1,KpointHam)), real(this%H1(1,2,KpointHam)), &
+    !& real(this%H1(2,1,KpointHam)), real(this%H1(2,2,KpointHam))
+    !write(92, '(5F30.20)') this%time * au__fs, aimag(this%H1(1,1,KpointHam)), aimag(this%H1(1,2,KpointHam)), &
+    !      & aimag(this%H1(2,1,KpointHam)), aimag(this%H1(2,2,KpointHam))
     ! Call updateS to apply Peierls phase to the overlap at t=delta_t
     !if (this%tLaser) then
     !  call updateS(this, neighbourList, nNeighbourSK, img2CentCell, coord, iSquare, 0) ! iStep=0
@@ -4563,8 +4595,12 @@ contains
         & this%dispersion, this%rho, coordAll, errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
-    print *, 'H1 updateH: ', this%time
-    print *, this%H1(1,2,1), this%H1(2,1,1)
+!    print *, 'H1 updateH: ', this%time
+!    print *, this%H1(1,2,KpointHam), this%H1(2,1,KpointHam)
+    !write(91, '(5F30.20)') this%time * au__fs, real(this%H1(1,1,KpointHam)), real(this%H1(1,2,KpointHam)), &
+    !      & real(this%H1(2,1,KpointHam)), real(this%H1(2,2,KpointHam))
+    !write(92, '(5F30.20)') this%time * au__fs, aimag(this%H1(1,1,KpointHam)), aimag(this%H1(1,2,KpointHam)), &
+    !      & aimag(this%H1(2,1,KpointHam)), aimag(this%H1(2,2,KpointHam))
 
     ! When using vector potential and laser, overlap matrix should be updated with Peierl phase
     !if (this%tLaser) then
