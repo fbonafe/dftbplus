@@ -4117,10 +4117,8 @@ contains
       if (this%iCall == 1) then
         allocate(this%tdVecPot(3, 0:this%nSteps))
       end if
-!      this%tdVecPot = 0.0_dp                       !so H1 = H_gs
+      this%tdVecPot = 0.0_dp                       !so H1 = H_gs
       this%tdVecPot(this%currPolDir,:) = -c * this%field
-       print *, 'DEBUGGING tdVecPot'
-       print *, this%tdVecPot(this%currPolDir,:)
     end if
 
     call initializeTDVariables(this, this%trho, this%H1, this%Ssqr, this%Sinv, H0, this%ham0, &
