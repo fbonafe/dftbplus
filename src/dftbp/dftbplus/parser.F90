@@ -5659,6 +5659,8 @@ contains
     call getChildValue(node, "FillingsFromFile", input%tFillingsFromFile, .false.)
     call getChildValue(node, "Currents", input%tCurrents, .false.)
     call getChildValue(node, "UseVectorPotential", input%tUseVectorPotential, .false.)
+    call getChildValue(node, "UpdateProjectionBasis", input%tUpdateProjBasis, .false.)
+    call getChildValue(node, "WriteEigenvalues", input%tEigenvalues, .false.)
 
     if (input%tPump) then
       call getChildValue(node, "PumpProbeFrames", input%tdPPFrames)
