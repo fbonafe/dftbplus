@@ -497,8 +497,6 @@ contains
     this%hamiltonianType = hamiltonianType
     this%tUseVectorPotential = inp%tUseVectorPotential
     this%doSCC = tSCC_bool
-    allocate(this%parallelKS, source=parallelKS)
-    allocate(this%populDat(this%parallelKS%nLocalKS))
 !    if (.not.any([allocated(sccCalc), allocated(tblite)])) then
 !      @:RAISE_ERROR(errStatus, -1, "SCC calculations are currently required for dynamics")
 !    end if
