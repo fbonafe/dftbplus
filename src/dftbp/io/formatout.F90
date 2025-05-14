@@ -313,10 +313,10 @@ contains
     integer :: nAtom, nSpecies, ii
 
 200 format(I5)
-201 format(A5,3F16.8)
-202 format(A5,6F16.8)
-203 format(A5,4F16.8)
-204 format(A5,7F16.8)
+201 format(A5,3F20.12)
+202 format(A5,6F20.12)
+203 format(A5,4F20.12)
+204 format(A5,7F20.12)
 
     nAtom = size(coords, dim=2)
     nSpecies = maxval(species)
