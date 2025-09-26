@@ -4173,24 +4173,6 @@ contains
       call kickDM(this, this%trho, this%Ssqr, this%Sinv, iSquare, coord)
     end if
 
-    call getPositionDependentEnergy(this, env, this%energy, coordAll, img2CentCell, neighbourList,&
-        & repulsive, iAtInCentralRegion)
-
-    call getTDEnergy(this, env, this%energy, this%rhoPrim, this%trho, neighbourList, nNeighbourSK,&
-        & orb, iSquare, iSparseStart, img2CentCell, this%ham0, this%qq, q0, this%potential,&
-        & this%chargePerShell, this%energyKin, tDualSpinOrbit, thirdOrd, solvation, hybridXc,&
-        & qDepExtPot, this%qBlock, dftbu, xi, iAtInCentralRegion, tFixEf, Ef, onSiteElements,&
-        & errStatus)
-    @:PROPAGATE_ERROR(errStatus)
-
-    if (.not. this%tReadRestart .or. this%tProbe) then
-      ! output ground state data
-      call writeTDOutputs(this, this%dipoleDat, this%qDat, this%energyDat, &
-          & this%forceDat, this%coorDat, this%fdBondPopul, this%fdBondEnergy, this%atomEnergyDat,&
-          & 0.0_dp, this%energy, this%energyKin, this%dipole, this%deltaQ, coord, this%totalForce,&
-          & 0)
-    end if
-
     ! now first step of dynamics is computed (init of leapfrog and first step of nuclei)
 
     ! had to add the "or tKick" option to override rhoOld if tReadRestart = yes, otherwise it will
@@ -4205,6 +4187,24 @@ contains
 
     this%rho => this%trho
     this%rhoOld => this%trhoOld
+
+    call getPositionDependentEnergy(this, env, this%energy, coordAll, img2CentCell, neighbourList,&
+        & repulsive, iAtInCentralRegion)
+
+    call getTDEnergy(this, env, this%energy, this%rhoPrim, this%trhoOld, neighbourList, nNeighbourSK,&
+        & orb, iSquare, iSparseStart, img2CentCell, this%ham0, this%qq, q0, this%potential,&
+        & this%chargePerShell, this%energyKin, tDualSpinOrbit, thirdOrd, solvation, hybridXc,&
+        & qDepExtPot, this%qBlock, dftbu, xi, iAtInCentralRegion, tFixEf, Ef, onSiteElements,&
+        & errStatus)
+    @:PROPAGATE_ERROR(errStatus)
+
+    if (.not. this%tReadRestart .or. this%tProbe) then
+      ! output ground state data
+      call writeTDOutputs(this, this%dipoleDat, this%qDat, this%energyDat, &
+          & this%forceDat, this%coorDat, this%fdBondPopul, this%fdBondEnergy, this%atomEnergyDat,&
+          & 0.0_dp, this%energy, this%energyKin, this%dipole, this%deltaQ, coord, this%totalForce,&
+          & 0)
+    end if
 
     if (this%tIons) then
       coord(:,:) = this%coordNew
@@ -4460,6 +4460,18 @@ contains
           & this%totalForce, iStep)
     end if
 
+    if (this%tIons) then
+      coord(:,:) = this%coordNew
+      call handleCoordinateChange(this, env, boundaryCond, hybridXc, ints, orb, neighbourList,&
+          & nNeighbourSK, symNeighbourList, nNeighbourCamSym, coord, coordAll, this%ham0,&
+          & iSparseStart, img2CentCell, this%rhoPrim, this%ErhoPrim, errStatus)
+      @:PROPAGATE_ERROR(errStatus)
+      call updateH0S(this, env, ints, orb, skHamCont, skOverCont, neighbourList, nNeighbourSK,&
+          & iSparseStart, img2CentCell, iSquare, coordAll, this%Sinv, this%Ssqr, this%ham0,&
+          & Dsqr=this%Dsqr, Qsqr=this%Qsqr)
+      @:PROPAGATE_ERROR(errStatus)
+    end if
+
     if (this%tWriteRestart .and. iStep > 0 .and. mod(iStep, max(this%restartFreq,1)) == 0) then
       allocate(velInternal(3,size(this%movedVelo, dim=2)))
       if (this%tIons) then
@@ -4467,7 +4479,7 @@ contains
       else
         velInternal(:,:) = 0.0_dp
       end if
-      call writeRestartFile(this%rho, this%rhoOld, coord, velInternal, this%time, this%dt, &
+        call writeRestartFile(this%rho, this%rhoOld, coord, velInternal, this%time, this%dt, &
           &restartFileName, this%tWriteRestartAscii, errStatus)
       @:PROPAGATE_ERROR(errStatus)
       deallocate(velInternal)
@@ -4489,18 +4501,6 @@ contains
           & errStatus)
       @:PROPAGATE_ERROR(errStatus)
       deallocate(velInternal)
-    end if
-
-    if (this%tIons) then
-      coord(:,:) = this%coordNew
-      call handleCoordinateChange(this, env, boundaryCond, hybridXc, ints, orb, neighbourList,&
-          & nNeighbourSK, symNeighbourList, nNeighbourCamSym, coord, coordAll, this%ham0,&
-          & iSparseStart, img2CentCell, this%rhoPrim, this%ErhoPrim, errStatus)
-      @:PROPAGATE_ERROR(errStatus)
-      call updateH0S(this, env, ints, orb, skHamCont, skOverCont, neighbourList, nNeighbourSK,&
-          & iSparseStart, img2CentCell, iSquare, coordAll, this%Sinv, this%Ssqr, this%ham0,&
-          & Dsqr=this%Dsqr, Qsqr=this%Qsqr)
-      @:PROPAGATE_ERROR(errStatus)
     end if
 
     call getChargeDipole(this, this%deltaQ, this%qq, this%multipole, this%dipole, q0,&
