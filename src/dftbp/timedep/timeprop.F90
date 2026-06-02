@@ -3511,7 +3511,7 @@ contains
 
 
   !> Initialize ion dynamics
-  subroutine initIonDynamics(this, coordNew, coord)
+  subroutine initIonDynamics(this, coordNew, coord, movedAccel)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
@@ -3521,6 +3521,9 @@ contains
 
     !> Atomic coordinates
     real(dp), intent(in) :: coord(:,:)
+
+    !> Accelerations (optional, only needed for restart+kick to apply Euler bootstrap)
+    real(dp), intent(in), optional :: movedAccel(:,:)
 
     ! Data for the velocity verlet integrator
     type(TVelocityVerlet), allocatable :: pVelocityVerlet
@@ -3544,10 +3547,19 @@ contains
     end if
 
     ! Euler step from 1st VV step
-    ! Velocities should actually be v(t+0.5*dt), not v(t),
-    ! like this: this%movedVelo(:,:) = this%movedVelo + 0.5_dp * movedAccel * this%dt
-    coordNew(:,:) = coord
-    coordNew(:,this%indMovedAtom) = coordNew(:,this%indMovedAtom) + this%movedVelo * this%dt
+    ! For restart+kick case: apply Euler bootstrap to properly initialize velocity history
+    ! Transform v(t) to v(t-0.5*dt) and advance coordinates with acceleration term
+    if (present(movedAccel)) then
+      print *,'Moved accel',movedAccel
+      print *,'Moved velo',this%movedVelo
+      coordNew(:,:) = coord
+      coordNew(:,this%indMovedAtom) = coordNew(:,this%indMovedAtom) + this%movedVelo * this%dt !&
+        !  & + 0.5_dp * movedAccel(:,:) * this%dt * this%dt
+      this%movedVelo(:,:) = this%movedVelo + movedAccel * this%dt
+    else
+      coordNew(:,:) = coord
+      coordNew(:,this%indMovedAtom) = coordNew(:,this%indMovedAtom) + this%movedVelo * this%dt
+    end if
 
     ! This re-initializes the velocity Verlet propagator with coordNew
     if (this%nDynamicsInit == 0) then
@@ -4642,7 +4654,13 @@ contains
     ! needed to initialise the electronic dynamics
     ! coordNew stores the coordinates at t=dt
     if (this%tIons) then
-      call initIonDynamics(this, this%coordNew, coord)
+      ! Pass accelerations only for restart+kick case to apply proper Euler bootstrap
+      if (this%tReadRestart .and. this%tKick) then
+        print *,"Passing movedAccel to initIonDynamics for restart+kick case"
+        call initIonDynamics(this, this%coordNew, coord, this%movedAccel)
+      else
+        call initIonDynamics(this, this%coordNew, coord)
+      end if
     end if
 
     ! after calculating the TD function, set initial time to zero for probe simulations
@@ -4666,25 +4684,24 @@ contains
         & qDepExtPot, this%qBlock, dftbu, xi, iAtInCentralRegion, tFixEf, Ef, onSiteElements,&
         & errStatus)
     @:PROPAGATE_ERROR(errStatus)
-
-    if (.not. this%tReadRestart .or. this%tProbe) then
-      ! output ground state data
-      call writeTDOutputs(this, env, this%dipoleDat, this%qDat, this%energyDat, &
-          & this%forceDat, this%coorDat, this%fdBondPopul, this%fdBondEnergy, this%atomEnergyDat,&
-          & 0.0_dp, this%energy, this%energyKin, this%dipole, this%deltaQ, coord, this%totalForce,&
-          & 0)
-    end if
-
     ! now first step of dynamics is computed (init of leapfrog and first step of nuclei)
 
     ! had to add the "or tKick" option to override rhoOld if tReadRestart = yes, otherwise it will
     ! be badly initialised
-    if (.not.this%tReadRestart .or. (this%tKick .and. this%startTime < this%dt / 10.0_dp)) then
+    if (.not.this%tReadRestart .or. this%tKick) then
       ! Initialize electron dynamics
       ! rhoOld is now the GS DM, rho will be the DM at time=dt
       this%trhoOld(:,:,:) = this%trho
       call initializePropagator(this, env, this%dt, this%trhoOld, this%trho, this%H1, this%Sinv,&
           & coordAll, skOverCont, orb, neighbourList, nNeighbourSK, img2CentCell, iSquare)
+    end if
+    
+    if (.not. this%tReadRestart .or. this%tProbe) then
+    ! output ground state data
+    call writeTDOutputs(this, env, this%dipoleDat, this%qDat, this%energyDat, &
+        & this%forceDat, this%coorDat, this%fdBondPopul, this%fdBondEnergy, this%atomEnergyDat,&
+        & 0.0_dp, this%energy, this%energyKin, this%dipole, this%deltaQ, coord, this%totalForce,&
+        & 0)
     end if
 
     this%rho => this%trho
