@@ -5249,8 +5249,7 @@ contains
 
     if (tHaveEigenDecomposition) then
 
-      ! Determine if "EachAtom" mode is being used by checking for an EachAtom child node
-      tUseEachAtom = .false.
+      ! Determine if "EachAtom" mode is being used by checking for a child node
       call getChild(node, "ProjectStates", child, requested=.false.)
       if (associated(child)) then
 
@@ -7523,8 +7522,7 @@ contains
     character(lc) :: strTmp
     logical :: do_ldos, tUseEachAtom
 
-    ! Determine if "EachAtom" mode is being used by checking for an EachAtom child node
-    ! within a single Region node
+    ! Determine if "EachAtom" mode is being used by checking for it within the Region node
     tUseEachAtom = .false.
     call getChild(node, "Region", regionNode, requested=.false.)
     if (associated(regionNode)) then
@@ -7537,6 +7535,9 @@ contains
     if (tUseEachAtom) then
       ! EachAtom mode: Region = EachAtom { Atoms = ... }
       call getChildValue(eachAtomNode, "Atoms", buffer, child=child2, multiple=.true.)
+      if (.not. associated(child2)) then
+        call detailedError(eachAtomNode, "EachAtom requires an 'Atoms' specification")
+      end if
       call getSelectedAtomIndices(child2, char(buffer), geom%speciesNames,&
           & geom%species(idxdevice(1) : idxdevice(2)), pTmpI1,&
           & selectionRange=[idxdevice(1), idxdevice(2)], indexRange=[1, geom%nAtom])
