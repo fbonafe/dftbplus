@@ -6908,6 +6908,7 @@ contains
       end if
 
       call getChildValue(pTmp2, "GateDirection", poisson%gatedir, 2)
+      call getChildValue(pTmp2, "MirrorGateDirection", poisson%gateDirMirror, .false.)
 
     case ("cylindrical")
       poisson%gateType = "C"

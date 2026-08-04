@@ -37,6 +37,7 @@ module dftbp_poisson_parameters
   integer,  public :: verbose
   integer,  public :: biasdir
   integer,  public :: gatedir
+  logical, public :: gateDirMirror
   integer,  public :: contdir(MAXNCONT)
   character(mc), allocatable, public :: contnames(:)
   integer,  public :: ncont
@@ -125,6 +126,7 @@ module dftbp_poisson_parameters
     verbose = 0
     biasdir = 0
     gatedir = 0
+    gateDirMirror = .false.
     contdir(:) = 0
     ncont = 0
     ni(:) = 0; ni(1) = 1;

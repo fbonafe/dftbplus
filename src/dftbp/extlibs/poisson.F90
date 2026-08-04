@@ -25,6 +25,7 @@ module dftbp_extlibs_poisson
 #:endif
 #:if WITH_POISSON
   use dftbp_poisson_boundaryconditions, only : poissonBCsEnum
+  use dftbp_poisson_parameters, only : gateDirMirror
   use dftbp_poisson_poisson, only : active_id, angShells, bufferBox, check_biasdir, check_contacts,&
       & cntr_gate, cntr_gate_set, check_localbc, check_parameters, check_poisson_box, deltaR_max,&
       & DoCilGate, DoGate, DoInsulator, dQmat, dR_cont, dr_eps, eps_r, fixed_renorm, FoundBox, Gate, GateDir,&
@@ -194,6 +195,9 @@ module dftbp_extlibs_poisson
 
     !> gate direction
     integer :: gatedir
+
+    !> mirror the gate to the opposite side
+    logical :: gateDirMirror
 
     !> Gate potential
     real(dp) :: gatePot
@@ -669,6 +673,7 @@ contains
 
       ! Planar gate must be along y
       GateDir = poissoninfo%gatedir
+      GateDirMirror = poissoninfo%gateDirMirror
 
       OxLength = poissoninfo%insLength
       OxLength_t = poissoninfo%insLength_t

@@ -17,9 +17,9 @@ module dftbp_poisson_fancybc
   use dftbp_poisson_bulkpot, only : super_array
   use dftbp_poisson_mpi_poisson, only : id0
   use dftbp_poisson_parameters, only : base_atom1, base_atom2, biasdir, cntr_cont, cntr_gate,&
-      & contdir, dr_cont, dr_eps, eps_r, gate, gatedir, gatelength_l, gatelength_t, iatc, localbc,&
-      & mixed, ncont, OxLength, OxLength_t, OxLength_l, poissbox, r_cont, rmin_gate, rmin_ins,&
-      & tip_atom, tipbias
+      & contdir, dr_cont, dr_eps, eps_r, gate, gatedir, gateDirMirror, gatelength_l, gatelength_t,&
+      & iatc, localbc, mixed, ncont, OxLength, OxLength_t, OxLength_l, poissbox, r_cont,&
+      & rmin_gate, rmin_ins, tip_atom, tipbias
 
   implicit none
 
@@ -112,6 +112,8 @@ Subroutine coef_gate(x,y,z,cxx,cyy,czz,cx,cy,cz,ce)
    real(kind=dp) :: z_min_gate,z_max_gate
    real(kind=dp) :: x_min_ox,x_max_ox,y_min_ox,y_max_ox,z_min_ox,z_max_ox
    real(kind=dp) :: dz_dist, a, b, a1, b1, a2, b2
+   real(kind=dp) :: gate_distance, ox_distance, dz_left, dz_right, d_cntr
+   logical :: inside_gate_region
    real(kind=dp) :: a_z, b_z, a1_z, b1_z
    real(kind=dp) :: a_x, b_x, a1_x, b1_x
    real(kind=dp) :: a_y, b_y, a1_y, b1_y
@@ -171,25 +173,54 @@ Subroutine coef_gate(x,y,z,cxx,cyy,czz,cx,cy,cz,ce)
    y_min_ox = cntr_gate(i_y) - OxLength_l/2.d0
    y_max_ox = cntr_gate(i_y) + OxLength_l/2.d0
 
+   gate_distance = abs(Rmin_Gate)
+   ox_distance = abs(Rmin_Ins)
+
    ! Gate and oxide bounds in gate direction (z_z is along gate axis)
-   if (Rmin_Gate.gt.0.d0) then
+   if (gateDirMirror) then
+      z_min_gate = cntr_gate(i_z) - PoissBox(i_z,i_z)
+      z_max_gate = cntr_gate(i_z) - gate_distance
+      z_min_ox = cntr_gate(i_z) - PoissBox(i_z,i_z)
+      z_max_ox = cntr_gate(i_z) - ox_distance
+   else if (Rmin_Gate.gt.0.d0) then
       z_min_gate = cntr_gate(i_z) + Rmin_Gate
       z_max_gate = cntr_gate(i_z) + PoissBox(i_z,i_z)
       z_min_ox = cntr_gate(i_z) + Rmin_Ins
       z_max_ox = cntr_gate(i_z) + PoissBox(i_z,i_z)
    else
       z_min_gate = cntr_gate(i_z) - PoissBox(i_z,i_z)
-      z_max_gate = cntr_gate(i_z) - Rmin_Gate
+      z_max_gate = cntr_gate(i_z) + Rmin_Gate
       z_min_ox = cntr_gate(i_z) - PoissBox(i_z,i_z)
-      z_max_ox = cntr_gate(i_z) - Rmin_Ins
+      z_max_ox = cntr_gate(i_z) + Rmin_Ins
+   end if
+
+   ! Check if inside gate electrode (Dirichlet region)
+   if (gateDirMirror) then
+      d_cntr = abs(z_z - cntr_gate(i_z))
+      inside_gate_region = d_cntr.ge.gate_distance
+   else if (Rmin_Gate.gt.0.d0) then
+      inside_gate_region = z_z.ge.(cntr_gate(i_z) + Rmin_Gate)
+   else
+      inside_gate_region = z_z.le.(cntr_gate(i_z) + Rmin_Gate)
    end if
 
    ! Oxide region with exponential decay smoothing
    if (OxLength_t.gt.0.d0 .and. OxLength_l.gt.0.d0) then
 
-      ! Calculate perpendicular distances to oxide box surfaces
-      ! min_val = minimum value in list, returns 0 if all are negative
-      dz_dist = max(z_min_ox - z_z, 0.d0, z_z - z_max_ox)
+      ! Calculate perpendicular distances to oxide box surfaces.
+      ! In the mirrored case the oxide occupies the same positive/negative-side
+      ! regions as the gate, so choose the side from the sign of z_z - cntr_gate(i_z).
+      if (gateDirMirror) then
+         if (z_z - cntr_gate(i_z) .ge. 0.d0) then
+            dz_dist = max((cntr_gate(i_z) + ox_distance) - z_z, 0.d0, &
+                & z_z - (cntr_gate(i_z) + PoissBox(i_z,i_z)))
+         else
+            dz_dist = max((cntr_gate(i_z) - PoissBox(i_z,i_z)) - z_z, 0.d0, &
+                & z_z - (cntr_gate(i_z) - ox_distance))
+         end if
+      else
+         dz_dist = max(z_min_ox - z_z, 0.d0, z_z - z_max_ox)
+      end if
       dist_x_min = max(x_min_ox - x_x, 0.d0, x_x - x_max_ox)
       dist_y_min = max(y_min_ox - y_y, 0.d0, y_y - y_max_ox)
 
@@ -220,10 +251,8 @@ Subroutine coef_gate(x,y,z,cxx,cyy,czz,cx,cy,cz,ce)
          cz = a1 * dz_dist
       end if
 
-      ! Check if inside gate electrode (Dirichlet region)
       if ((x_x.ge.x_min_gate).and.(x_x.le.x_max_gate).and. &
-          (y_y.ge.y_min_gate).and.(y_y.le.y_max_gate).and. &
-          (z_z.ge.z_min_gate).and.(z_z.le.z_max_gate)) then
+          (y_y.ge.y_min_gate).and.(y_y.le.y_max_gate).and. inside_gate_region) then
          ! Inside gate electrode - conductor
          cxx = 0.d0
          cyy = 0.d0
@@ -246,8 +275,7 @@ Subroutine coef_gate(x,y,z,cxx,cyy,czz,cx,cy,cz,ce)
    else
       ! No oxide enabled - just check for gate electrode (standard planar gate)
       if ((x_x.ge.x_min_gate).and.(x_x.le.x_max_gate).and. &
-          (y_y.ge.y_min_gate).and.(y_y.le.y_max_gate).and. &
-          (z_z.ge.z_min_gate).and.(z_z.le.z_max_gate)) then
+          (y_y.ge.y_min_gate).and.(y_y.le.y_max_gate).and. inside_gate_region) then
          ! Inside gate electrode - conductor
          cxx = 0.d0
          cyy = 0.d0
@@ -275,6 +303,8 @@ subroutine gate_bound(iparm,fparm,dlx,dly,dlz,rhs)
  real(kind=dp) :: x_min_gate,x_max_gate,y_min_gate,y_max_gate
  real(kind=dp) :: z_min_gate,z_max_gate
  real(kind=dp) :: x_min_ox,x_max_ox,y_min_ox,y_max_ox,z_min_ox,z_max_ox
+ real(kind=dp) :: gate_distance, d_cntr
+ logical :: inside_gate_region
  integer :: i,j,k,i_x,i_y,i_z
 
    select case (gatedir)
@@ -297,12 +327,16 @@ subroutine gate_bound(iparm,fparm,dlx,dly,dlz,rhs)
    y_min_gate=cntr_gate(i_y)-GateLength_l/2.d0
    y_max_gate=cntr_gate(i_y)+GateLength_l/2.d0
 
-   if (Rmin_Gate.gt.0.d0) then
+   gate_distance = abs(Rmin_Gate)
+   if (gateDirMirror) then
+      z_min_gate = cntr_gate(i_z) - PoissBox(i_z,i_z)
+      z_max_gate = cntr_gate(i_z) - gate_distance
+   else if (Rmin_Gate.gt.0.d0) then
       z_min_gate=cntr_gate(i_z)+Rmin_Gate
       z_max_gate=cntr_gate(i_z)+PoissBox(i_z,i_z)
    else
       z_min_gate=cntr_gate(i_z)-PoissBox(i_z,i_z)
-      z_max_gate=cntr_gate(i_z)-Rmin_Gate
+      z_max_gate=cntr_gate(i_z)+Rmin_Gate
    end if
 
    do i = 1,iparm(14)
@@ -333,7 +367,15 @@ subroutine gate_bound(iparm,fparm,dlx,dly,dlz,rhs)
           ! If Rmin_Gate is negative the gate is on -gatedir
 
           ! Set gate boundary condition if inside gate electrode bounds
-          if(z_z.ge.z_min_gate.and.z_z.le.z_max_gate) then
+          if (gateDirMirror) then
+             d_cntr = abs(z_z - cntr_gate(i_z))
+             inside_gate_region = d_cntr.ge.gate_distance
+          else if (Rmin_Gate.gt.0.d0) then
+             inside_gate_region = z_z.ge.(cntr_gate(i_z)+Rmin_Gate)
+          else
+             inside_gate_region = z_z.le.(cntr_gate(i_z)+Rmin_Gate)
+          end if
+          if (inside_gate_region) then
              if(x_x.ge.x_min_gate.and.x_x.le.x_max_gate) then
                 if(y_y.ge.y_min_gate.and.y_y.le.y_max_gate) then
                    rhs(i,j,k)=gate
