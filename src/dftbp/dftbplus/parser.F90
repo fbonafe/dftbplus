@@ -6901,8 +6901,6 @@ contains
       call getChildValue(pTmp2, "Permittivity", poisson%eps_r, 1.0_dp, modifier=modifier,&
           & child=field)
 
-      poisson%gateCntrSet(:) = .false.
-      poisson%gateCntr(:) = 0.0_dp
       if (poisson%insRad .gt. 0.0_dp) then
         poisson%insulatorIsPresent = .true.
       end if
@@ -6941,40 +6939,40 @@ contains
         poisson%insulatorIsPresent = .true.
       end if
 
-      poisson%gateCntrSet(:) = .false.
-      poisson%gateCntr(:) = 0.0_dp
-      ! The gate center variables need to be provided separately to be able to distinguish
-      ! between a missing entry (in which case the center will be set at the origin) and an
-      ! entry explicitly setting the center at the origin.
-      call getChild(pTmp2, "GateCenterX", pNode2, requested=.false.)
-      if (associated(pNode2)) then
-        call getChildValue(pNode2, "Pos", poisson%gateCntr(1), 0.0_dp, modifier=modifier,&
-            & child=field)
-        call convertUnitHsd(char(modifier), lengthUnits, field, poisson%gateCntr(1))
-        poisson%gateCntrSet(1) = .true.
-      end if
-
-      call getChild(pTmp2, "GateCenterY", pNode2, requested=.false.)
-      if (associated(pNode2)) then
-        call getChildValue(pNode2, "Pos", poisson%gateCntr(2), 0.0_dp, modifier=modifier,&
-            & child=field)
-        call convertUnitHsd(char(modifier), lengthUnits, field, poisson%gateCntr(2))
-        poisson%gateCntrSet(2) = .true.
-      end if
-
-      call getChild(pTmp2, "GateCenterZ", pNode2, requested=.false.)
-      if (associated(pNode2)) then
-        call getChildValue(pNode2, "Pos", poisson%gateCntr(3), 0.0_dp, modifier=modifier,&
-            & child=field)
-        call convertUnitHsd(char(modifier), lengthUnits, field, poisson%gateCntr(3))
-        poisson%gateCntrSet(3) = .true.
-      end if
-
     case default
       call getNodeHSDName(pTmp2, buffer)
       call detailedError(pTmp2, "Invalid gate type '" // char(buffer) // "'")
 
     end select
+
+    poisson%gateCntrSet(:) = .false.
+    poisson%gateCntr(:) = 0.0_dp
+    ! The gate center variables need to be provided separately to be able to distinguish
+    ! between a missing entry (in which case the center will be set at the origin) and an
+    ! entry explicitly setting the center at the origin.
+    call getChild(pTmp2, "GateCenterX", pNode2, requested=.false.)
+    if (associated(pNode2)) then
+      call getChildValue(pNode2, "Pos", poisson%gateCntr(1), 0.0_dp, modifier=modifier,&
+          & child=field)
+      call convertUnitHsd(char(modifier), lengthUnits, field, poisson%gateCntr(1))
+      poisson%gateCntrSet(1) = .true.
+    end if
+
+    call getChild(pTmp2, "GateCenterY", pNode2, requested=.false.)
+    if (associated(pNode2)) then
+      call getChildValue(pNode2, "Pos", poisson%gateCntr(2), 0.0_dp, modifier=modifier,&
+          & child=field)
+      call convertUnitHsd(char(modifier), lengthUnits, field, poisson%gateCntr(2))
+      poisson%gateCntrSet(2) = .true.
+    end if
+
+    call getChild(pTmp2, "GateCenterZ", pNode2, requested=.false.)
+    if (associated(pNode2)) then
+      call getChildValue(pNode2, "Pos", poisson%gateCntr(3), 0.0_dp, modifier=modifier,&
+          & child=field)
+      call convertUnitHsd(char(modifier), lengthUnits, field, poisson%gateCntr(3))
+      poisson%gateCntrSet(3) = .true.
+    end if
 
     call getChildValue(pNode, "MaxParallelNodes", poisson%maxNumNodes, 1)
 
