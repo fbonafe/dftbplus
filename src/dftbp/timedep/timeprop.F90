@@ -3511,7 +3511,7 @@ contains
 
 
   !> Initialize ion dynamics
-  subroutine initIonDynamics(this, coordNew, coord, movedAccel)
+  subroutine initIonDynamics(this, coordNew, coord)
 
     !> ElecDynamics instance
     type(TElecDynamics), intent(inout) :: this
@@ -3521,9 +3521,6 @@ contains
 
     !> Atomic coordinates
     real(dp), intent(in) :: coord(:,:)
-
-    !> Accelerations (optional, only needed for restart+kick to apply Euler bootstrap)
-    real(dp), intent(in), optional :: movedAccel(:,:)
 
     ! Data for the velocity verlet integrator
     type(TVelocityVerlet), allocatable :: pVelocityVerlet
@@ -3547,19 +3544,8 @@ contains
     end if
 
     ! Euler step from 1st VV step
-    ! For restart+kick case: apply Euler bootstrap to properly initialize velocity history
-    ! Transform v(t) to v(t-0.5*dt) and advance coordinates with acceleration term
-    if (present(movedAccel)) then
-      print *,'Moved accel',movedAccel
-      print *,'Moved velo',this%movedVelo
-      coordNew(:,:) = coord
-      coordNew(:,this%indMovedAtom) = coordNew(:,this%indMovedAtom) + this%movedVelo * this%dt !&
-        !  & + 0.5_dp * movedAccel(:,:) * this%dt * this%dt
-      this%movedVelo(:,:) = this%movedVelo + movedAccel * this%dt
-    else
-      coordNew(:,:) = coord
-      coordNew(:,this%indMovedAtom) = coordNew(:,this%indMovedAtom) + this%movedVelo * this%dt
-    end if
+    coordNew(:,:) = coord
+    coordNew(:,this%indMovedAtom) = coordNew(:,this%indMovedAtom) + this%movedVelo * this%dt
 
     ! This re-initializes the velocity Verlet propagator with coordNew
     if (this%nDynamicsInit == 0) then
@@ -4582,6 +4568,18 @@ contains
         & errStatus)
     @:PROPAGATE_ERROR(errStatus)
 
+    ! initializeTDVariables() receives ham0 as intent(out) and resets it from H0, which was
+    ! built for the geometry given in the input file. When restarting, the geometry is taken
+    ! from the dump file instead, so H0/S have to be rebuilt for those coordinates. Without
+    ! this the first (leapfrog bootstrap) Hamiltonian is evaluated at the wrong geometry,
+    ! which seeds the 2*dt leapfrog mode in restart+kick (Probe) runs with ion dynamics.
+    if (this%tReadRestart .or. (this%iCall > 1 .and. this%tIons)) then
+      call updateH0S(this, env, ints, orb, skHamCont, skOverCont, neighbourList, nNeighbourSK,&
+          & iSparseStart, img2CentCell, iSquare, coordAll, this%Sinv, this%Ssqr, this%ham0,&
+          & errStatus, Dsqr=this%Dsqr, Qsqr=this%Qsqr)
+      @:PROPAGATE_ERROR(errStatus)
+    end if
+
     if (this%tPeriodic) then
       call initLatticeVectors(this, boundaryCond)
     end if
@@ -4654,13 +4652,7 @@ contains
     ! needed to initialise the electronic dynamics
     ! coordNew stores the coordinates at t=dt
     if (this%tIons) then
-      ! Pass accelerations only for restart+kick case to apply proper Euler bootstrap
-      if (this%tReadRestart .and. this%tKick) then
-        print *,"Passing movedAccel to initIonDynamics for restart+kick case"
-        call initIonDynamics(this, this%coordNew, coord, this%movedAccel)
-      else
-        call initIonDynamics(this, this%coordNew, coord)
-      end if
+      call initIonDynamics(this, this%coordNew, coord)
     end if
 
     ! after calculating the TD function, set initial time to zero for probe simulations
